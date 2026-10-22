@@ -1,0 +1,32 @@
+name: literature
+
+on:
+  pull_request:
+    paths: ["literature/**", "scripts/lit_index.py"]
+  push:
+    branches: [main]
+    paths: ["literature/papers/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyyaml
+      - name: Проверить карточки
+        run: python scripts/lit_index.py --check
+      - name: Пересобрать index.md (только main)
+        if: github.event_name == 'push'
+        run: |
+          python scripts/lit_index.py
+          git config user.name "lit-bot"
+          git config user.email "lit-bot@users.noreply.github.com"
+          git add literature/index.md
+          git diff --cached --quiet || git commit -m "lit: rebuild index"
+          git push
