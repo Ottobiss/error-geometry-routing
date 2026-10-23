@@ -1,0 +1,9 @@
+# tested with torch 2.12, torchvision 0.27, transformers 4.46.3
+torch>=2.1
+torchvision>=0.16
+transformers>=4.40,<5
+tensorboard>=2.17
+omegaconf>=2.3
+tqdm
+pillow
+numpy
