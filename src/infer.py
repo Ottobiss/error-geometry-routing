@@ -14,10 +14,10 @@ from torchvision.io import ImageReadMode, read_image
 from torchvision.transforms import v2
 from tqdm import tqdm
 
-from config import load_config
-from data import CLASSES, MEAN, STD, colorize, heatmap, make_panel, save_rgb
-from hyperbolic import hyperbolic_uncertainty
-from model import HyperSegFormer
+from src.config import load_config
+from src.data import CLASSES, MEAN, STD, colorize, heatmap, make_panel, save_rgb
+from src.hyperbolic import hyperbolic_uncertainty
+from src.model import HyperSegFormer
 
 
 def main():

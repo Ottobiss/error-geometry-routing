@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from hyperbolic import hyperbolic_uncertainty
+from src.hyperbolic import hyperbolic_uncertainty
 
 
 class HyperUL(nn.Module):

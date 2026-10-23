@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import SegformerConfig, SegformerForSemanticSegmentation
 
-from hyperbolic import HyperbolicMLR, dist0, expmap0
+from src.hyperbolic import HyperbolicMLR, dist0, expmap0
 
 
 class HyperSegFormer(nn.Module):
