@@ -4,6 +4,7 @@ torchvision>=0.16
 transformers>=4.40,<5
 tensorboard>=2.17
 omegaconf>=2.3
+scipy
 tqdm
 pillow
 numpy
