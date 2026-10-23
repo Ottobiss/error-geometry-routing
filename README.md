@@ -71,13 +71,15 @@ python -m features.build knn                  # kNN / cDNP / CSLS (~16 мин)
 python -m baseline.failure                    # сверка с таблицей 1 Kang et al.
 python -m routing.run --method entropy --fields
 python -m routing.run --method proto -p variant=B -p feature=spred_mean --name proto_B_spred_mean
-python -m routing.pixel_eval                  # попиксельная оценка Махаланобиса по выходу B0
 
 python -m features.components --dataset acdc  # то же для ACDC (подгонка остаётся на CS P0)
 python -m routing.summary                     # все методы на CS P1 и ACDC (по условиям и все)
 
 python -m features.tiles --dataset cityscapes --input image   # B2 по патчам 256 + контекст 64, замеры времени
 python -m routing.tiles --test cityscapes:p1 --tiles image_t256_m64   # каскад: mIoU против мс на кадр
+python -m routing.cascade                     # каскад вживую: реальное время, fp32 / fp16
+python -m features.tile_features --dataset cityscapes --tiles image_t256_m64   # признаки патчей
+python -m routing.tile_router                 # обученный роутер на патчах против энтропии
 ```
 
 Методы роутера — `routing/methods/`; список: `python -m routing.run --help`. Любой построитель

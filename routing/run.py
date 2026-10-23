@@ -10,9 +10,7 @@
   - fit на компонентах Cityscapes P0 с меткой, оценка на всех компонентах тестовой популяции;
   - core.evaluation.evaluate_routing: mIoU итоговой маски и доля выигрыша оракула при 5/10/20/30/50%,
     Spearman с Δ/пиксель, парный bootstrap по кадрам (2000, сид 0) разницы с entropy при 10/20%;  - опорные строки: random, entropy, oracle, mIoU только B0 / только B2;
-    --fields добавляет p- и MetaSeg-поля → Δ (обязательно в первой таблице серии);
-  - если у метода есть pixel_score — AUROC «пиксель B0 ошибочный» рядом с MSP и энтропией.
-Результаты: results/runs/<датасет>_<популяция>/<name>/ — scores.parquet, metrics.json, config.json.
+    --fields добавляет p- и MetaSeg-поля → Δ (обязательно в первой таблице серии);Результаты: results/runs/<датасет>_<популяция>/<name>/ — scores.parquet, metrics.json, config.json.
 """
 import argparse
 from datetime import date
@@ -74,11 +72,6 @@ def main():
     assert not missing, f"опорных строк нет в таблице: {missing}"
     table, base = evaluate_routing(test.table, scores, routing_cache(dataset, pop),
                                    references=["entropy"] + extra_refs)
-    pixel = None
-    if hasattr(method, "pixel_score"):
-        from routing.pixel_eval import pixel_auroc
-        pixel = pixel_auroc(args.method, method.pixel_score, dataset, pop)
-
     out = run_dir(name, args.test)
     out.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"image_id": test.table.image_id, "comp_id": test.table.comp_id,
@@ -87,7 +80,7 @@ def main():
                                      "compare": args.compare, "reference": args.reference,
                                      "test": args.test})
     write_json(out / "metrics.json", {"miou_b0": base["B0"], "miou_b2": base["B2"],
-                                      "rows": table.to_dict("records"), "pixel_auroc": pixel},
+                                      "rows": table.to_dict("records")},
                stamp=False)
     commit = git_commit()
 
@@ -103,11 +96,6 @@ def main():
                 f"Δ{ref}@20%", f"ci_lo{tag}@20%", f"ci_hi{tag}@20%"]
         print(f"Разница mIoU с {ref}, парный bootstrap по кадрам (2000), 95%-интервал:")
         print(table[["метод"] + cols].round(2).to_string(index=False))
-    if pixel is None:
-        print("AUROC «пиксель ошибочный»: не считается — у метода нет попиксельной оценки")
-    else:
-        print("AUROC «пиксель B0 ошибочный» (5% пикселей):",
-              ", ".join(f"{k} {v:.3f}" for k, v in pixel.items()))
     print("\nСтрока для EXPERIMENTS.md:\n" + journal_row(name, args.method, params, table.iloc[0],
                                                           commit, extra_refs))
 

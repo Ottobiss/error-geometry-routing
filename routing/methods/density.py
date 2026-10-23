@@ -140,10 +140,6 @@ class MahalanobisOutput:
         self.thr = self.stats.quantiles(samples, self.q) if self.agg == "frac" else None
         return self
 
-    def pixel_score(self, x, cls):
-        """Попиксельная оценка для AUROC: x (n, 19) логиты, cls (n,) → MD (n,)."""
-        return self.stats.md(transform(x, self.variant), cls)
-
     def score(self, test):
         cache = routing_cache(test.dataset, test.population, test.root)
         logits = LogitStore(test.dataset)
