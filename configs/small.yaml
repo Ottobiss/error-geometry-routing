@@ -1,0 +1,5 @@
+# Stage 3 on top of train.yaml: python -m src.train configs/train.yaml configs/small.yaml data.root=...
+out: runs/small
+
+data:
+  large_uncertainty: runs/large/uncertainty  # stage 2 output (src.export_uncertainty)

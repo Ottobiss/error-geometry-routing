@@ -1,0 +1,7 @@
+checkpoint: runs/large/best.pt
+root: ???                    # Cityscapes root
+split: train
+out: runs/large/uncertainty  # = data.large_uncertainty of the small model
+stride: 4                    # maps are saved at 1/stride resolution
+amp: false
+workers: 4

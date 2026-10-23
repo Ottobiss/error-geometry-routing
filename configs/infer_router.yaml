@@ -1,0 +1,8 @@
+small: runs/small/best.pt
+large: runs/large/best.pt
+input: ???                   # image file or directory
+out: runs/infer_router
+threshold: 0.2               # route a segment if mean(own - predicted large uncertainty) over it is above this
+stride: 4                    # segments are found at 1/stride resolution
+amp: false
+image_every: 20              # TensorBoard panel every N images

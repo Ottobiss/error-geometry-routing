@@ -8,16 +8,21 @@ data:
   scale_range: [0.5, 2.0]
   batch_size: 8
   workers: 8
+  large_uncertainty: null    # src.export_uncertainty output: the model also learns the large model's uncertainty
 
 model:
+  variant: b0                # MiT encoder: b0 | b2
   pretrained: nvidia/mit-b0  # HF hub id or local path, null = random init
   embed_dim: 64
-  c: 0.7                     # the Poincaré ball has curvature -c
+  manifold: poincare         # model of hyperbolic space: poincare | lorentz
+  c: 0.7                     # the hyperbolic space has curvature -c
 
 loss:
   t: 1.869                   # uncertainty weight 1 / log(t + d), Eq. 11
   hr: 1.0                    # OHUEM, Eq. 13; 1.0 keeps all pixels
   class_weights: null        # optional w_k, Eq. 12
+  large_unc_weight: 1.0      # weight of the loss between the predicted and the exported large-model uncertainty
+  large_unc_loss: bce        # bce | mse | l1; the prediction is always the sigmoid of the extra output
 
 train:
   iters: 80000

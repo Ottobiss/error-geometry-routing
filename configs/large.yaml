@@ -1,0 +1,6 @@
+# Stage 1 on top of train.yaml: python -m src.train configs/train.yaml configs/large.yaml data.root=...
+out: runs/large
+
+model:
+  variant: b2
+  pretrained: nvidia/mit-b2

@@ -1,0 +1,9 @@
+small: runs/small/best.pt
+large: runs/large/best.pt
+root: ???                    # Cityscapes root, the val split is used
+out: runs/eval_router
+thresholds: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]  # route a segment if mean(own - predicted large uncertainty) is above
+stride: 4                    # segments are found at 1/stride resolution
+amp: false
+images: 3                    # TensorBoard panels
+workers: 4
