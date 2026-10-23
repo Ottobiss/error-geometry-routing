@@ -1,0 +1,34 @@
+seed: 0
+out: runs/hyperul
+
+data:
+  root: ???                  # Cityscapes root with leftImg8bit/ and gtFine/
+  crop: [512, 1024]          # H, W
+  base_size: [2048, 1024]    # W, H for the random resize
+  scale_range: [0.5, 2.0]
+  batch_size: 8
+  workers: 8
+
+model:
+  pretrained: nvidia/mit-b0  # HF hub id or local path, null = random init
+  embed_dim: 64
+  c: 0.7                     # the Poincaré ball has curvature -c
+
+loss:
+  t: 1.869                   # uncertainty weight 1 / log(t + d), Eq. 11
+  hr: 1.0                    # OHUEM, Eq. 13; 1.0 keeps all pixels
+  class_weights: null        # optional w_k, Eq. 12
+
+train:
+  iters: 80000
+  lr: 1.5e-4                 # encoder
+  head_lr_mult: 10           # decoder and hyperbolic MLR
+  weight_decay: 0.01
+  warmup: 1000
+  poly_power: 0.9
+  amp: false                 # bf16 autocast
+
+log:
+  every: 50
+  val_every: 4000
+  val_images: 3              # validation panels in TensorBoard
