@@ -6,8 +6,8 @@ ZIP читается удалённо через HTTP Range: сначала ог
 
 Логин — через cityscapesscripts (спросит логин/пароль в терминале).
 
-    python scripts/fetch_cityscapes.py --check
-    python scripts/fetch_cityscapes.py
+    python -m download.cityscapes --check
+    python -m download.cityscapes
 """
 import argparse
 import io
@@ -97,21 +97,18 @@ def main():
     if args.check:
         return
 
-    done = 0
     for k, info in enumerate(entries, 1):
         out = os.path.join(args.dest, info.filename)
         if os.path.exists(out) and os.path.getsize(out) == info.file_size:
-            done += 1
             continue
         os.makedirs(os.path.dirname(out), exist_ok=True)
         tmp = out + ".part"
         with zf.open(info) as src, open(tmp, "wb") as dst:   # zipfile проверяет CRC
             dst.write(src.read())
         os.replace(tmp, out)
-        done += 1
         if k % 25 == 0 or k == len(entries):
             print(f"  {k}/{len(entries)}")
-    print(f"Готово: {done} файлов в {args.dest}")
+    print(f"Готово: {len(entries)} файлов в {args.dest}")
 
 
 if __name__ == "__main__":

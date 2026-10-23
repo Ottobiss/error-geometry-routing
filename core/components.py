@@ -1,4 +1,5 @@
-"""Компоненты предсказанной карты, метки и признаки по Kang et al. (arXiv 2610.16058), S1–S2.
+"""Компоненты предсказанной карты, метки и признаки по Kang et al. (arXiv 2610.16058), S1–S2,
+и агрегация попиксельных карт по компонентам.
 
 Компонента — 8-связный регион одного предсказанного класса. Все функции работают
 с одним изображением: pred (H, W) int, probs (C, H, W) float — softmax лёгкой модели.
@@ -6,10 +7,27 @@
 Места, где статья неоднозначна, помечены «ДОПУЩЕНИЕ».
 """
 import numpy as np
+import torch
 from scipy import ndimage
 
+NC = 19                        # классы Cityscapes (trainIds)
 IGNORE = 255
 EIGHT = np.ones((3, 3), dtype=bool)
+
+# Поля базового предиктора p (таблица S2): 18 числовых + one-hot класса
+P_NUMERIC = [
+    "area", "boundary_size", "interior_size", "mean_max_probability", "mean_entropy",
+    "mean_probability_margin", "mean_predicted_class_probability", "mean_entropy_boundary",
+    "mean_entropy_interior", "mean_max_probability_boundary", "mean_max_probability_interior",
+    "mean_probability_margin_boundary", "mean_probability_margin_interior",
+    "relative_component_area", "relative_boundary_size", "relative_interior_size",
+    "touches_image_boundary", "has_interior",
+]
+P_FIELDS = P_NUMERIC + [f"class_{c}" for c in range(NC)]
+# Поля адаптированного MetaSeg (S2.6): 15 дескрипторов + 19 средних вероятностей классов
+M_FIELDS = ([f"ms_{s}_{t}" for s in ("E", "D") for t in ("mean", "in", "bd", "rel", "rel_in")]
+            + ["ms_S", "ms_S_in", "ms_S_bd", "ms_S_rel", "ms_S_rel_in"]
+            + [f"ms_prob_mean_{c}" for c in range(NC)])
 
 
 def extract_components(pred):
@@ -103,7 +121,7 @@ def delta_labels(comp, n, gt, pred_light, pred_heavy):
     return delta.astype(np.int64), n_valid
 
 
-def base_fields(comp, classes, maps, num_classes=19):
+def base_fields(comp, classes, maps, num_classes=NC):
     """37 полей базового предиктора p (таблица S2): 18 числовых + one-hot класса."""
     n = len(classes)
     h, w = comp.shape
@@ -167,3 +185,27 @@ def metaseg_fields(comp, classes, maps, probs):
     for c in range(probs.shape[0]):
         f[f"prob_mean_{c}"], _ = _means(comp, n, probs[c])
     return f
+
+
+# --- Агрегация попиксельной карты x (H·W,) по компонентам comp (H·W,) с n компонентами ---
+
+def comp_mean(x, comp, n):
+    """Среднее по компоненте; x, comp — тензоры на одном устройстве, результат float64."""
+    k = torch.bincount(comp, minlength=n).double()
+    return torch.zeros(n, dtype=torch.float64, device=x.device).index_add_(0, comp, x.double()) / k
+
+
+def comp_max(x, comp, n):
+    return torch.full((n,), -np.inf, device=x.device).scatter_reduce(0, comp, x.float(), "amax")
+
+
+def comp_min(x, comp, n):
+    return torch.full((n,), np.inf, device=x.device).scatter_reduce(0, comp, x.float(), "amin")
+
+
+def comp_quantile(x, comp, n, q):
+    """q-квантиль по компоненте (ближайший ранг снизу); x, comp — numpy."""
+    k = np.bincount(comp, minlength=n)
+    order = np.lexsort((x, comp))
+    start = np.cumsum(k) - k
+    return x[order][start + np.floor(q * (k - 1)).astype(np.int64)]

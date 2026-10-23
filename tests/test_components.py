@@ -1,6 +1,6 @@
 import numpy as np
 
-from common.components import (
+from core.components import (
     IGNORE, base_fields, boundary_metaseg, boundary_p, delta_labels,
     extract_components, failure_labels, metaseg_fields, pixel_maps,
 )
