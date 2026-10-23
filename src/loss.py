@@ -34,3 +34,30 @@ class HyperUL(nn.Module):
             "dist": dist.detach().mean(),
         }
         return loss, stats
+
+
+LARGE_UNC_LOSSES = {  # logit z of the predicted large-model uncertainty, target u in [0, 1] -> per-pixel loss
+    "bce": lambda z, u: F.binary_cross_entropy_with_logits(z, u, reduction="none"),
+    "mse": lambda z, u: (z.sigmoid() - u) ** 2,
+    "l1": lambda z, u: (z.sigmoid() - u).abs(),
+}
+
+
+class RoutingLoss(nn.Module):
+    """HyperUL as in the paper (segmentation weighted by the own hyperbolic uncertainty). Given the large model's
+    uncertainty exported by src.export_uncertainty, also a loss (bce | mse | l1) between it and the small model's
+    prediction of it, the sigmoid of the extra output."""
+
+    def __init__(self, hyperul, large_weight=1.0, large_loss="bce"):
+        super().__init__()
+        self.hyperul, self.large_weight, self.large_loss = hyperul, large_weight, LARGE_UNC_LOSSES[large_loss]
+
+    def forward(self, logits, dist, large_pred, target, large_unc=None):
+        loss, stats = self.hyperul(logits, dist, target)
+        if large_unc is None:
+            return loss, stats
+        valid = target != self.hyperul.ignore_index
+        n = valid.sum().clamp_min(1)
+        stats["large_unc"] = (self.large_loss(large_pred, large_unc) * valid).sum() / n
+        stats["large_unc_mae"] = ((large_pred.detach().sigmoid() - large_unc).abs() * valid).sum() / n
+        return loss + self.large_weight * stats["large_unc"], stats

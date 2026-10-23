@@ -28,12 +28,16 @@ class Cityscapes(Dataset):
     """leftImg8bit/<split>/<city>/*_leftImg8bit.png + gtFine/<split>/<city>/*_gtFine_labelIds.png
 
     crop (H, W) enables training augmentation: random resize of base_size (W, H) by scale_range, crop, flip.
+    large_uncertainty: output dir of src.export_uncertainty; items then also carry the large model's uncertainty,
+    augmented together with the label.
     """
 
-    def __init__(self, root, split, crop=None, base_size=(2048, 1024), scale_range=(0.5, 2.0)):
+    def __init__(self, root, split, crop=None, base_size=(2048, 1024), scale_range=(0.5, 2.0), large_uncertainty=None):
         self.images = sorted(Path(root, "leftImg8bit", split).glob("*/*_leftImg8bit.png"))
         self.labels = [Path(root, "gtFine", split, p.parent.name, p.name.replace("leftImg8bit", "gtFine_labelIds"))
                        for p in self.images]
+        self.large_unc = ([Path(large_uncertainty, split, p.parent.name, p.name) for p in self.images]
+                          if large_uncertainty else None)
         augment = [
             v2.ScaleJitter(tuple(base_size), tuple(scale_range)),
             v2.RandomCrop(tuple(crop), pad_if_needed=True, fill={tv_tensors.Image: 0, tv_tensors.Mask: IGNORE}),
@@ -47,8 +51,14 @@ class Cityscapes(Dataset):
     def __getitem__(self, i):
         image = tv_tensors.Image(read_image(str(self.images[i]), ImageReadMode.RGB))
         label = tv_tensors.Mask(ID_TO_TRAIN[read_image(str(self.labels[i]))[0].long()])
-        image, label = self.transform(image, label)
-        return image.as_subclass(torch.Tensor), label.as_subclass(torch.Tensor).long()
+        if self.large_unc is None:
+            image, label = self.transform(image, label)
+            return image.as_subclass(torch.Tensor), label.as_subclass(torch.Tensor).long()
+
+        unc = read_image(str(self.large_unc[i]))[None].float() / 255  # saved at reduced resolution
+        unc = tv_tensors.Mask(F.interpolate(unc, label.shape, mode="bilinear", align_corners=False)[0, 0])
+        image, label, unc = self.transform(image, label, unc)
+        return image.as_subclass(torch.Tensor), label.as_subclass(torch.Tensor).long(), unc.as_subclass(torch.Tensor)
 
 
 def colorize(label):
