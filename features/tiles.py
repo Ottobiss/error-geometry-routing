@@ -91,6 +91,8 @@ def main():
                     help="окон в пачке B2; 8 ГБ видеопамяти — не больше 2 окон 768² или 1024²")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--timing-only", action="store_true", help="только перемерить время в tiles_<cfg>.json")
+    ap.add_argument("--precision", choices=["fp32", "fp16"], default="fp32",
+                    help="для --timing-only: fp16 — под autocast, пишется в ms_fp16 (ms — fp32)")
     args = ap.parse_args()
 
     if args.timing_only:
@@ -99,10 +101,12 @@ def main():
         info = json.loads(path.read_text(encoding="utf-8"))
         size = DATASETS[args.dataset].size
         src_shape = next(iter(loader(get_dataset(args.dataset, full=args.input == "image"))))[args.input].shape
-        info["ms"] = timings(load_model("b0"), load_model("b2"), size, tuple(src_shape),
-                             info["window_input_px"], info["max_batch"])
+        key = "ms" if args.precision == "fp32" else "ms_fp16"
+        with torch.autocast("cuda", dtype=torch.float16, enabled=args.precision == "fp16"):
+            info[key] = timings(load_model("b0"), load_model("b2"), size, tuple(src_shape),
+                                info["window_input_px"], info["max_batch"])
         path.write_text(json.dumps(info, ensure_ascii=False, indent=1))
-        print(path, {k: v if k != "b2_batch" else [round(x, 1) for x in v] for k, v in info["ms"].items()})
+        print(path, {k: v if k != "b2_batch" else [round(x, 1) for x in v] for k, v in info[key].items()})
         return
 
     full = args.input == "image"

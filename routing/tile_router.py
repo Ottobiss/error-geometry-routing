@@ -32,6 +32,7 @@ GROUPS = {"энтропия": ["m_entropy"],
           "+геометрия": UNCERTAINTY + ["m_entropy", "m_md", "m_ddu", "m_knn", "m_proto", "m_maha"]}
 TESTS = {"cityscapes:p1": "image_t256_m64", "acdc:all": "small_t256_m64"}
 KS = (1, 2, 3)
+AVGS = (0.5, 1, 2, 3)          # общий бюджет: в среднем патчей на кадр
 
 
 def fit_predict(train, test, cols):
@@ -87,9 +88,36 @@ def evaluate(test_spec, table, scores, eff, n_boot=2000):
         for name, m in per.items():
             diff = _miou_batch((w @ m).reshape(-1, NC, NC)) - ref_b
             miou = _miou(m.sum(0).reshape(NC, NC))
-            rows.append({"тест": test_spec, "метод": name, "k": k, "mIoU": miou,
+            rows.append({"тест": test_spec, "метод": name, "режим": "k на кадр", "k": k, "mIoU": miou,
                          "Δentropy": miou - _miou(ref.sum(0).reshape(NC, NC)),
                          "ci_lo": np.percentile(diff, 2.5), "ci_hi": np.percentile(diff, 97.5)})
+    return rows
+
+
+def evaluate_global(test_spec, table, scores, eff, avgs=AVGS, n_boot=2000):
+    """Общий бюджет: N = avg·(число кадров) лучших патчей по всему набору (одинаковое суммарное время
+    у всех методов; трудные кадры получают больше). Строки: метод × avg — mIoU, Δ к entropy, 95%."""
+    frames = list(table.groupby("image_id", sort=True).indices.items())
+    rng = np.random.default_rng(0)
+    w = rng.multinomial(len(frames), np.full(len(frames), 1 / len(frames)), size=n_boot)
+    rows = []
+    for avg in avgs:
+        n_total = round(avg * len(frames))
+        per = {}
+        for name, s in scores.items():
+            chosen = np.zeros(len(table), bool)
+            order = np.argsort(-s, kind="stable")[:n_total]
+            chosen[order[s[order] > -np.inf]] = True
+            per[name] = np.stack([(eff[i][1] + eff[i][0][np.flatnonzero(chosen[idx])].sum(0)).ravel()
+                                  for i, idx in frames])
+        ref_b = _miou_batch((w @ per["entropy"]).reshape(-1, NC, NC))
+        ref = _miou(per["entropy"].sum(0).reshape(NC, NC))
+        for name, m in per.items():
+            diff = _miou_batch((w @ m).reshape(-1, NC, NC)) - ref_b
+            miou = _miou(m.sum(0).reshape(NC, NC))
+            rows.append({"тест": test_spec, "метод": name, "режим": "общий бюджет", "k": avg, "mIoU": miou,
+                         "Δentropy": miou - ref, "ci_lo": np.percentile(diff, 2.5),
+                         "ci_hi": np.percentile(diff, 97.5)})
     return rows
 
 
@@ -108,15 +136,16 @@ def main():
     scores = base_scores(cs_p1)
     for g, cols in GROUPS.items():
         scores[f"CS P0 · {g}"] = fit_predict(cs_p0, cs_p1, cols)
-    rows += evaluate("cityscapes:p1", cs_p1, scores,
-                     effects("cityscapes:p1", TESTS["cityscapes:p1"], cs_p1.image_id.unique()))
+    eff = effects("cityscapes:p1", TESTS["cityscapes:p1"], cs_p1.image_id.unique())
+    rows += evaluate("cityscapes:p1", cs_p1, scores, eff) + evaluate_global("cityscapes:p1", cs_p1, scores, eff)
 
     scores = base_scores(acdc)
     for g, cols in GROUPS.items():
         scores[f"CS P0 · {g}"] = fit_predict(cs_p0, acdc, cols)
         scores[f"ACDC LOCO · {g}"] = loco(acdc, cols)
         scores[f"CS P0 + ACDC LOCO · {g}"] = loco(acdc, cols, extra=cs_p0)
-    rows += evaluate("acdc:all", acdc, scores, effects("acdc:all", TESTS["acdc:all"], acdc.image_id.unique()))
+    eff = effects("acdc:all", TESTS["acdc:all"], acdc.image_id.unique())
+    rows += evaluate("acdc:all", acdc, scores, eff) + evaluate_global("acdc:all", acdc, scores, eff)
 
     out = pd.DataFrame(rows)
     (RESULTS / "summary").mkdir(exist_ok=True)
@@ -125,9 +154,10 @@ def main():
     pd.set_option("display.max_rows", 200)
     cell = out.apply(lambda r: f"{r.mIoU:.2f} ({r.Δentropy:+.2f} [{r.ci_lo:+.2f},{r.ci_hi:+.2f}])", axis=1)
     for test_spec in TESTS:
-        t = out[out.тест == test_spec].assign(cell=cell)
-        print(f"\n{test_spec}: mIoU (Δ к энтропии [95%]) при k патчах на кадр")
-        print(t.pivot(index="метод", columns="k", values="cell").to_string())
+        for mode in ("k на кадр", "общий бюджет"):
+            t = out[(out.тест == test_spec) & (out.режим == mode)].assign(cell=cell)
+            print(f"\n{test_spec}, {mode}: mIoU (Δ к энтропии того же режима [95%]); столбцы — патчей на кадр")
+            print(t.pivot(index="метод", columns="k", values="cell").to_string())
 
 
 if __name__ == "__main__":

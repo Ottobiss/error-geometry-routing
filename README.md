@@ -80,6 +80,8 @@ python -m routing.tiles --test cityscapes:p1 --tiles image_t256_m64   # каск
 python -m routing.cascade                     # каскад вживую: реальное время, fp32 / fp16
 python -m features.tile_features --dataset cityscapes --tiles image_t256_m64   # признаки патчей
 python -m routing.tile_router                 # обученный роутер на патчах против энтропии
+
+python -m features.export                     # таблицы признаков компонент и патчей (~5 мин), results/tabular/
 ```
 
 Методы роутера — `routing/methods/`; список: `python -m routing.run --help`. Любой построитель
