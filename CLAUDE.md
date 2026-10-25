@@ -14,6 +14,8 @@ Routing pipeline (user's design; it replaced first a joint B0+B2 training, then 
 
 At inference the small model outputs segmentation, its own uncertainty and the predicted uncertainty of the large model; where its own uncertainty is relatively high and the large one relatively low, the large model is run.
 
+The whole network is not trained (user's requirement): on top of a Cityscapes-trained SegFormer only the layers HyperUL acts on are fine-tuned, and uncertainties are averaged over patches.
+
 ## Environment
 
 - Python: `/home/artyom/LIBS/ML/bin/python` (3.12, torch 2.12, torchvision 0.27, transformers 4.46.3, omegaconf 2.3, scipy).
@@ -49,14 +51,14 @@ Because tensorboard is missing locally, put a stub module into `sys.modules["tor
 
 ## Architecture
 
-`model.HyperSegFormer` (paper Fig. 2) wraps HF `SegformerForSemanticSegmentation` built from `VARIANTS` (b0/b2 presets; pretrained MiT weights are loaded into that config). The last decoder 1×1 conv outputs `embed_dim` channels = Euclidean embeddings v (1/4 resolution) → native `expmap0` of the chosen model of hyperbolic space → `hyperbolic.HyperbolicMLR` logits; with `large_head` (set by `model.build_model` when `data.large_uncertainty` is given) one more channel is the logit of the large model's uncertainty. `forward` returns `(logits, dist, large)` upsampled to the input size (dist = hyperbolic distance to the origin, large is None without the head); the hyperbolic part runs in fp32 even under bf16 autocast.
+`model.HyperSegFormer` (paper Fig. 2) wraps HF `SegformerForSemanticSegmentation` built from `VARIANTS` (b0/b2 presets; `model.pretrained` weights are loaded into that config with `ignore_mismatched_sizes`, so the 19-class classifier of a segmentation checkpoint is initialized anew). The last decoder 1×1 conv outputs `embed_dim` channels = Euclidean embeddings v (1/4 resolution) → native `expmap0` of the chosen model of hyperbolic space → `hyperbolic.HyperbolicMLR` logits; with `large_head` (set by `model.build_model` when `data.large_uncertainty` is given) one more channel is the logit of the large model's uncertainty. `forward` returns `(logits, dist, large)` upsampled to the input size (dist = hyperbolic distance to the origin, large is None without the head), dist and large averaged over `model.patch` × `model.patch` squares (`patch_mean`, partial squares at the right/bottom edges); the hyperbolic part runs in fp32 even under bf16 autocast. With `model.freeze` only `net.decode_head.classifier` and `mlr` require grad and the overridden `train()` keeps `net` in eval mode.
 
 - `hyperbolic.MANIFOLDS`: `Poincare` and `Lorentz` (curvature −c), implemented natively after Peng et al., "Hyperbolic Deep Neural Networks: A Survey" (TPAMI 2022). Each defines `origin`, `geodesic` (used by the shared `expmap0` with `scale` = Riemannian length of a Euclidean unit vector at the origin: 2 for Poincaré, 1 for Lorentz) and `dist` (the survey's distance formula; `dist0` feeds HyperUL and uncertainty); `max_rho` caps √c · distance.
 - `loss.HyperUL` (Eq. 10–14): per-pixel CE × `1 / log(t + d)`, d = dist / per-image max (detached); OHUEM keeps pixels with `d <= d_min + hr * (1 - d_min)`.
 - `loss.RoutingLoss` = HyperUL + `large_unc_weight` × `large_unc_loss` (`LARGE_UNC_LOSSES`: bce | mse | l1 between the sigmoid of the large-head logit and the exported large-model uncertainty) on labelled pixels; `large_unc_mae` is logged for every choice. Without the exported map it is plain HyperUL.
 - `export_uncertainty` (stage 2) runs the large model on un-augmented full-resolution images of a split and saves `hyperbolic_uncertainty` as 8-bit PNGs at 1/`stride` resolution, `<out>/<split>/<city>/<image name>`.
 - `data.Cityscapes` maps labelIds → trainIds on the fly; train augmentation is torchvision v2 `ScaleJitter` (its `target_size` is (W, H)) + `RandomCrop` (mask fill 255) + flip. With `large_uncertainty` it loads the exported map, upsamples it to the label size and augments it as a second mask; items become `(image, label, large_unc)`.
-- `train.SegMetrics`: mIoU and, per named uncertainty map, ECE of 1 − uncertainty (as in Table XIV) and mean uncertainty of correct vs misclassified pixels. `train.py` also holds `make_loaders`, `param_groups`, `poly_scheduler`, `endless`.
+- `train.SegMetrics`: mIoU and, per named uncertainty map, ECE of 1 − uncertainty (as in Table XIV) and mean uncertainty of correct vs misclassified pixels. `train.py` also holds `make_loaders`, `param_groups` (frozen parameters left out), `poly_scheduler`, `endless`.
 - `routing.Router(small, large)` takes two loaded models (the small one must have the large head). `routing.segment_gain` averages gain = own hyperbolic uncertainty − predicted large uncertainty over segments (connected regions of one class in the small prediction, scipy, at 1/`stride` resolution); `Router.cascade` runs the large model only if some segment's gain exceeds the threshold and copies its prediction into those segments.
 - `eval_router` runs both models on every val image and logs small/large mIoU and hyperbolic ECE, the MAE between the predicted and the real large uncertainty, a PR curve of segment gain vs fixable pixels (small wrong, large right) and, per threshold (TensorBoard step = 100 × threshold), routed mIoU, launch rate, routed pixels and fix precision/recall.
 
@@ -70,7 +72,12 @@ HyperUL:
 - Eq. 13 as printed is always true; it is implemented as a per-image threshold between the least and the most confident pixel.
 - Uncertainty weights are computed from `dist.detach()`.
 - `embed_dim=64` is not from the paper. d_c(expmap0(v), 0) = 2‖v‖, so a large classifier init saturates embeddings at the ball boundary where radial gradients vanish; HF init (std 0.02) keeps them inside.
-- Defaults c=0.7, t=1.869, hr=1.0 are the best SegFormer-B0/Cityscapes setting (Tables XI–XII); lr 1.5e-4 (decoder ×10), 80k iterations, crop 512×1024 follow the paper; batch 8 on one GPU (paper: 24 on 4×A100). The same values are used for B2.
+- Defaults c=0.7, t=1.869, hr=1.0 are the best SegFormer-B0/Cityscapes setting (Tables XI–XII); lr 1.5e-4 (decoder ×10), 80k iterations, crop 512×1024 follow the paper; batch 8 on one GPU (paper: 24 on 4×A100). The same values are used for B2. They were tuned for full per-pixel training: with patches and a frozen network t and hr may need retuning.
+
+Fine-tuning and patches:
+
+- `model.freeze: true` (default) trains only the layers HyperUL acts on: the last 1×1 decoder conv (embeddings and the large-uncertainty logit) and the hyperbolic MLR, at lr × head_lr_mult = 1.5e-3. The rest comes frozen from `nvidia/segformer-{b0,b2}-finetuned-cityscapes-1024-1024` (configs match `VARIANTS`) and stays in eval mode (BatchNorm statistics, no drop path / dropout). Full training as in the paper: `model.freeze=false model.pretrained=nvidia/mit-b0`.
+- `model.patch` (default 32 px, 1 = per pixel as in the paper) averages the hyperbolic distance, so Eq. 15 is per patch everywhere (HyperUL weights, OHUEM, metrics, export, routing) and normalized by the most confident patch, and the large-uncertainty logit, one logit per patch: BCE makes its sigmoid the patch mean of the target. Patches are aligned to the top-left corner of the input (the training crop or the full image).
 
 Models of hyperbolic space:
 
@@ -84,7 +91,7 @@ Routing:
 - "Segmentation loss + uncertainty loss as in the paper" = HyperUL: the paper has one loss, CE weighted by the hyperbolic uncertainty. Each model's own uncertainty is its hyperbolic uncertainty (Eq. 15), nothing extra is learned for it.
 - The small model predicts the large model's uncertainty with a separate output channel (sigmoid) trained toward the exported maps; its own hyperbolic uncertainty is not pulled toward the large one, since routing needs both.
 - Default `loss.large_unc_loss: bce` (soft targets). Like MSE it estimates the conditional mean, which the segment averaging in routing needs (L1 estimates the median). Unlike MSE and L1 through a sigmoid, its logit gradient û − u does not vanish when the prediction saturates near 0, where most targets lie. Its value has the target entropy as a floor, so compare runs by `large_unc_mae`.
-- The large model's uncertainty is exported once on un-augmented full-resolution training images (normalized by each full image's max distance) and augmented together with the label when the small model trains.
+- The large model's uncertainty is exported once on un-augmented full-resolution training images (normalized by each full image's max patch-mean distance) and augmented together with the label when the small model trains.
 - "Relatively high own / relatively low large uncertainty" = segment mean of own − predicted large uncertainty above the threshold.
 - The large model runs on the whole image; its prediction replaces the small one only on routed segments.
 
