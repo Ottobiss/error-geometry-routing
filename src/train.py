@@ -108,9 +108,11 @@ def make_loaders(data):
 
 
 def param_groups(model, lr, head_lr_mult):
-    """Encoder at lr; decoder and hyperbolic MLR at lr * head_lr_mult."""
+    """Encoder at lr; decoder and hyperbolic MLR at lr * head_lr_mult. Frozen parameters are left out."""
     head = [*model.net.decode_head.parameters(), *model.mlr.parameters()]
-    return [{"params": model.net.segformer.parameters(), "lr": lr}, {"params": head, "lr": lr * head_lr_mult}]
+    groups = [{"params": [p for p in params if p.requires_grad], "lr": group_lr}
+              for params, group_lr in ((model.net.segformer.parameters(), lr), (head, lr * head_lr_mult))]
+    return [group for group in groups if group["params"]]
 
 
 def poly_scheduler(optimizer, train):

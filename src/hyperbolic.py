@@ -86,7 +86,8 @@ MANIFOLDS = {"poincare": Poincare, "lorentz": Lorentz}
 
 
 def hyperbolic_uncertainty(dist):
-    """Eq. 15: 1 - d_c(x, 0) / d_c(u, 0), u is the most confident pixel of the image. dist: (B, H, W)."""
+    """Eq. 15: 1 - d_c(x, 0) / d_c(u, 0), u is the most confident pixel (patch, for patch means) of the image.
+    dist: (B, H, W)."""
     d_max = dist.flatten(1).amax(1).clamp_min(EPS)
     return 1 - dist / d_max[:, None, None]
 
