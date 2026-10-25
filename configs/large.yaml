@@ -3,4 +3,4 @@ out: runs/large
 
 model:
   variant: b2
-  pretrained: nvidia/mit-b2
+  pretrained: nvidia/segformer-b2-finetuned-cityscapes-1024-1024

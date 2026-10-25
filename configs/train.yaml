@@ -12,10 +12,12 @@ data:
 
 model:
   variant: b0                # MiT encoder: b0 | b2
-  pretrained: nvidia/mit-b0  # HF hub id or local path, null = random init
+  pretrained: nvidia/segformer-b0-finetuned-cityscapes-1024-1024  # HF hub id or local path, null = random init
+  freeze: true               # train only the last decoder conv and the hyperbolic MLR; false: all (from nvidia/mit-b0)
   embed_dim: 64
   manifold: poincare         # model of hyperbolic space: poincare | lorentz
   c: 0.7                     # the hyperbolic space has curvature -c
+  patch: 32                  # uncertainties are averaged over patch x patch pixel squares, 1 = per pixel
 
 loss:
   t: 1.869                   # uncertainty weight 1 / log(t + d), Eq. 11
@@ -26,7 +28,7 @@ loss:
 
 train:
   iters: 80000
-  lr: 1.5e-4                 # encoder
+  lr: 1.5e-4                 # encoder (not trained with model.freeze)
   head_lr_mult: 10           # decoder and hyperbolic MLR
   weight_decay: 0.01
   warmup: 1000
