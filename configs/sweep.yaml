@@ -1,0 +1,27 @@
+# Random search over the main hyperparameters: python -m src.sweep configs/sweep.yaml stage=large root=...
+stage: large                 # large: stage 1 (B2), scored on val; small: stage 3 (B0), scored by eval_router
+root: ???                    # dataset root in the Cityscapes layout
+out: runs/sweep              # trials go to <out>/<stage>/<trial>, results to <out>/<stage>/trials.jsonl
+trials: 20                   # trial 0 keeps the defaults of train.yaml
+seed: 0
+samples: 160000              # training images per trial (20k iterations at batch 8); iterations = samples / batch
+validations: 4               # per trial; the last one scores it
+gpus: null                   # null = all visible GPUs
+batch_per_gpu: null          # null = the largest that fits, probed on the GPU (kept for later runs of the same sweep)
+headroom_gb: 2.0             # GPU memory left free: CUDA context, NCCL, fragmentation
+workers: 8                   # data loading processes, total
+overrides: []                # for every trial, applied last, e.g. ["data.base_size=[1920,1080]", "train.amp=true"]
+metric: val/hyperbolic_ECE   # large stage: val/hyperbolic_ECE (lower is better) | val/mIoU | gap (wrong - correct)
+large_checkpoint: runs/large/best.pt       # small stage: the fixed large model, its model.patch is reused
+large_uncertainty: runs/large/uncertainty  # small stage: its exported uncertainty (stage 2)
+max_launch_rate: 0.5         # small stage: best routed mIoU with the large model launched on <= this share of images
+thresholds: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]  # small stage, eval_router
+
+space:                       # log: log-uniform on [low, high]; choice: one of the values
+  - {key: model.manifold, choice: [poincare, lorentz]}
+  - {key: model.c, log: [0.1, 2.0]}
+  - {key: loss.t, log: [1.2, 4.0]}
+  - {key: loss.hr, choice: [0.5, 0.7, 1.0]}
+  - {key: model.embed_dim, choice: [32, 64, 128]}
+  - {key: train.weight_decay, choice: [0.0, 0.01, 0.05]}
+  - {key: train.lr, log: [3.0e-5, 7.5e-4]}  # for batch 8, scaled by sqrt(batch / 8)
