@@ -6,8 +6,8 @@ data:
   crop: [512, 1024]          # H, W
   base_size: [2048, 1024]    # W, H for the random resize
   scale_range: [0.5, 2.0]
-  batch_size: 8
-  workers: 8
+  batch_size: 8              # total over all GPUs (torchrun splits it between the processes)
+  workers: 8                 # total over all GPUs
   large_uncertainty: null    # src.export_uncertainty output: the model also learns the large model's uncertainty
 
 model:
