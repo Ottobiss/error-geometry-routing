@@ -9,6 +9,7 @@ the large model's exported uncertainty.
 """
 import argparse
 import itertools
+import json
 import os
 import time
 from collections import defaultdict
@@ -97,7 +98,7 @@ def evaluate(model, loader, writer, step, amp=False, images=3):
         writer.add_scalar(tag, value, step)
     writer.flush()
     tqdm.write(f"step {step}: mIoU {results['val/mIoU']:.4f}  hyperbolic ECE {results['val/hyperbolic_ECE']:.4f}")
-    return results["val/mIoU"]
+    return results
 
 
 def endless(loader):
@@ -219,7 +220,10 @@ def main():
 
         if step % cfg.log.val_every == 0 or step == iters:
             if rank == 0:
-                miou = evaluate(model, val_loader, writer, step, cfg.train.amp, cfg.log.val_images)
+                results = evaluate(model, val_loader, writer, step, cfg.train.amp, cfg.log.val_images)
+                with open(out / "metrics.jsonl", "a") as f:  # for scripts, e.g. src.sweep
+                    f.write(json.dumps({"step": step} | results) + "\n")
+                miou = results["val/mIoU"]
                 ckpt = {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict(), "iter": step, "best": max(best, miou),
                         "config": OmegaConf.to_container(cfg)}

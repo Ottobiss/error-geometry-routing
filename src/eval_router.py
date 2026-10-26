@@ -6,6 +6,7 @@ well the routed segments cover the pixels it corrects.
     tensorboard --logdir runs        # route/* and routed/* charts: x axis = 100 * threshold
 """
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -81,6 +82,7 @@ def main():
           f"MAE {results['small/large_unc_mae']:.4f} | fixable pixels {results['route/fixable_pixels']:.3f}")
 
     print("threshold  launch_rate  routed_px  fix_precision  fix_recall  routed_mIoU")
+    rows = []
     for threshold, routed_metrics, (launched, routed_px, fixed) in zip(thresholds, routed, counts.tolist()):
         row = routed_metrics.compute("routed") | {
             "route/launch_rate": launched / len(loader),
@@ -92,7 +94,10 @@ def main():
             writer.add_scalar(tag, value, round(threshold * 100))
         print(f"{threshold:9.2f}  {row['route/launch_rate']:11.2f}  {row['route/routed_pixels']:9.3f}  "
               f"{row['route/fix_precision']:13.2f}  {row['route/fix_recall']:10.2f}  {row['routed/mIoU']:11.4f}")
+        rows.append({"threshold": threshold} | row)
     writer.close()
+    with open(Path(cfg.out, "results.json"), "w") as f:  # for scripts, e.g. src.sweep
+        json.dump({"summary": results, "thresholds": rows}, f, indent=1)
 
 
 if __name__ == "__main__":
