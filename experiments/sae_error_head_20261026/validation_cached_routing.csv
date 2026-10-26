@@ -1,0 +1,11 @@
+method,validation_target_windows,actual_windows,cached_mIoU
+raw_entropy,0.8,0.8,73.23843799958189
+raw_entropy,2.4,2.4,75.74361216758362
+confidence_bce,0.8,0.8,73.29984779823806
+confidence_bce,2.4,2.4,75.67742829730389
+activations_bce,0.8,0.8,72.85812808757555
+activations_bce,2.4,2.4,75.57594299277795
+both_bce,0.8,0.8,72.45275803846735
+both_bce,2.4,2.4,75.26055075486539
+both_sparse_ae,0.8,0.8,72.51661957146392
+both_sparse_ae,2.4,2.4,75.37422816414686

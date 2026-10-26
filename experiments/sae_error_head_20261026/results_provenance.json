@@ -1,0 +1,6 @@
+{
+  "source": "Original DataSphere notebook and error_head_v1_seed0_results.zip supplied by the user. CSVs copied from the archive unchanged.",
+  "verification": "ZIP integrity checked; SHA256 of all four head.pt and normalization.npz matched completed-run configs.",
+  "missing": [],
+  "note": "P1 is not part of this second-experiment validation result; no live timing in these tables."
+}
