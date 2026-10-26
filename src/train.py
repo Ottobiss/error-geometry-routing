@@ -4,16 +4,22 @@ the large model's exported uncertainty.
     python -m src.train configs/train.yaml data.root=/data/cityscapes                    # HyperUL baseline
     python -m src.train configs/train.yaml configs/large.yaml data.root=/data/cityscapes  # stage 1: large model
     python -m src.train configs/train.yaml configs/small.yaml data.root=/data/cityscapes  # stage 3: small model
+    torchrun --standalone --nproc_per_node=2 -m src.train configs/train.yaml ...          # any of them on 2 GPUs
     tensorboard --logdir runs        # parallel monitoring
 """
 import argparse
+import itertools
+import os
 import time
 from collections import defaultdict
+from datetime import timedelta
 from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
+from torch import distributed
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -95,16 +101,35 @@ def evaluate(model, loader, writer, step, amp=False, images=3):
 
 
 def endless(loader):
-    while True:
+    for epoch in itertools.count():
+        if isinstance(loader.sampler, DistributedSampler):
+            loader.sampler.set_epoch(epoch)  # a new shuffle every epoch
         yield from loader
 
 
-def make_loaders(data):
+def make_loaders(data, world=1):
+    """data.batch_size and data.workers are totals: each of the world processes gets an equal share."""
+    assert data.batch_size % world == 0, f"data.batch_size={data.batch_size} is not divisible by {world} GPUs"
     train_set = Cityscapes(data.root, "train", data.crop, data.base_size, data.scale_range, data.large_uncertainty)
-    train_loader = DataLoader(train_set, data.batch_size, shuffle=True, num_workers=data.workers, pin_memory=True,
-                              drop_last=True, persistent_workers=data.workers > 0)
-    val_loader = DataLoader(Cityscapes(data.root, "val"), 1, num_workers=data.workers, pin_memory=True)
+    sampler = DistributedSampler(train_set, drop_last=True) if world > 1 else None
+    workers = data.workers // world
+    train_loader = DataLoader(train_set, data.batch_size // world, shuffle=sampler is None, sampler=sampler,
+                              num_workers=workers, pin_memory=True, drop_last=True, persistent_workers=workers > 0)
+    val_loader = DataLoader(Cityscapes(data.root, "val"), 1, num_workers=workers, pin_memory=True)
     return train_loader, val_loader
+
+
+def setup_distributed():
+    """One process per GPU under torchrun (DDP) -> rank, local rank, number of processes."""
+    world = int(os.environ.get("WORLD_SIZE", 1))
+    if world == 1:
+        return 0, 0, 1
+    local_rank = int(os.environ["LOCAL_RANK"])
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+    # long timeout: the other processes wait while rank 0 validates
+    distributed.init_process_group("nccl" if torch.cuda.is_available() else "gloo", timeout=timedelta(hours=1))
+    return int(os.environ["RANK"]), local_rank, world
 
 
 def param_groups(model, lr, head_lr_mult):
@@ -125,11 +150,12 @@ def poly_scheduler(optimizer, train):
 def main():
     args = parse_args()
     cfg = load_config(args.config, args.overrides)
-    torch.manual_seed(cfg.seed)
+    rank, local_rank, world = setup_distributed()
+    torch.manual_seed(cfg.seed + rank)  # different augmentations per process; DDP copies rank 0's weights
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader, val_loader = make_loaders(cfg.data)
+    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else torch.device("cpu")
+    train_loader, val_loader = make_loaders(cfg.data, world)
 
     model = build_model(cfg, len(CLASSES)).to(device)
     criterion = RoutingLoss(HyperUL(cfg.loss.t, cfg.loss.hr, IGNORE, cfg.loss.class_weights),
@@ -145,57 +171,70 @@ def main():
         optimizer.load_state_dict(ckpt["optimizer"])
         scheduler.load_state_dict(ckpt["scheduler"])
         start, best = ckpt["iter"], ckpt["best"]
+    # DDP averages the gradients of the trained layers; rank 0 alone validates, logs and saves
+    train_model = model
+    if world > 1:
+        train_model = DistributedDataParallel(model, device_ids=[local_rank] if device.type == "cuda" else None)
 
     out = Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(out, flush_secs=30)
+    writer = SummaryWriter(out, flush_secs=30) if rank == 0 else None
     if args.eval_only:
-        evaluate(model, val_loader, writer, start, cfg.train.amp, cfg.log.val_images)
-        writer.close()
+        if rank == 0:
+            evaluate(model, val_loader, writer, start, cfg.train.amp, cfg.log.val_images)
+            writer.close()
         return
-    OmegaConf.save(cfg, out / "config.yaml")
-    writer.add_text("config", f"```yaml\n{OmegaConf.to_yaml(cfg)}```")
+    if rank == 0:
+        OmegaConf.save(cfg, out / "config.yaml")
+        writer.add_text("config", f"```yaml\n{OmegaConf.to_yaml(cfg)}```")
 
     iters = cfg.train.iters
     batches = endless(train_loader)
     running, tic = defaultdict(float), time.perf_counter()
-    for step in tqdm(range(start + 1, iters + 1), initial=start, total=iters, desc="train"):
+    for step in tqdm(range(start + 1, iters + 1), initial=start, total=iters, desc="train", disable=rank > 0):
         image, label, *large_unc = next(batches)
         image, label = image.to(device, non_blocking=True), label.to(device, non_blocking=True)
         large_unc = large_unc[0].to(device, non_blocking=True) if large_unc else None
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=cfg.train.amp):
-            logits, dist, large_pred = model(image)
+            logits, dist, large_pred = train_model(image)
         loss, stats = criterion(logits, dist, large_pred, label, large_unc)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
         scheduler.step()
 
-        for key, value in {"loss": loss, **stats}.items():
-            running[key] += value.detach()
-        if step % cfg.log.every == 0:
-            elapsed, tic = time.perf_counter() - tic, time.perf_counter()
-            for key, value in running.items():
-                writer.add_scalar(f"train/{key}", value.item() / cfg.log.every, step)
-            writer.add_scalar("train/lr", scheduler.get_last_lr()[0], step)
-            writer.add_scalar("train/img_per_s", cfg.log.every * cfg.data.batch_size / elapsed, step)
-            if device.type == "cuda":
-                writer.add_scalar("train/mem_gb", torch.cuda.max_memory_allocated() / 2 ** 30, step)
-            writer.add_histogram("train/dist", dist.detach()[:, ::4, ::4], step)
-            running.clear()
+        if rank == 0:  # statistics of rank 0's share of the batch
+            for key, value in {"loss": loss, **stats}.items():
+                running[key] += value.detach()
+            if step % cfg.log.every == 0:
+                elapsed, tic = time.perf_counter() - tic, time.perf_counter()
+                for key, value in running.items():
+                    writer.add_scalar(f"train/{key}", value.item() / cfg.log.every, step)
+                writer.add_scalar("train/lr", scheduler.get_last_lr()[0], step)
+                writer.add_scalar("train/img_per_s", cfg.log.every * cfg.data.batch_size / elapsed, step)
+                if device.type == "cuda":
+                    writer.add_scalar("train/mem_gb", torch.cuda.max_memory_allocated() / 2 ** 30, step)
+                writer.add_histogram("train/dist", dist.detach()[:, ::4, ::4], step)
+                running.clear()
 
         if step % cfg.log.val_every == 0 or step == iters:
-            miou = evaluate(model, val_loader, writer, step, cfg.train.amp, cfg.log.val_images)
-            ckpt = {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(), "iter": step, "best": max(best, miou),
-                    "config": OmegaConf.to_container(cfg)}
-            torch.save(ckpt, out / "last.pt")
-            if miou > best:
-                best = miou
-                torch.save(ckpt, out / "best.pt")
+            if rank == 0:
+                miou = evaluate(model, val_loader, writer, step, cfg.train.amp, cfg.log.val_images)
+                ckpt = {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(), "iter": step, "best": max(best, miou),
+                        "config": OmegaConf.to_container(cfg)}
+                torch.save(ckpt, out / "last.pt")
+                if miou > best:
+                    best = miou
+                    torch.save(ckpt, out / "best.pt")
+            if world > 1:
+                distributed.barrier()
             tic = time.perf_counter()
-    writer.close()
+    if rank == 0:
+        writer.close()
 
 
 if __name__ == "__main__":
     main()
+    if distributed.is_initialized():
+        distributed.destroy_process_group()
