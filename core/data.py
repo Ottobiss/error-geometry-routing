@@ -107,10 +107,10 @@ class ACDC(SegDataset):
 DATASETS = {"cityscapes": Cityscapes, "acdc": ACDC}
 
 
-def get_dataset(name, ids=None, full=True):
+def get_dataset(name, ids=None, full=True, split="val"):
     """Датасет name; ids — только эти кадры (порядок — по image_id); full=False — без кадра
-    в исходном разрешении (достаточно для лёгкой модели)."""
-    return DATASETS[name](ids, full)
+    в исходном разрешении (достаточно для лёгкой модели); split — часть датасета (train / val)."""
+    return DATASETS[name](ids, full, split=split)
 
 
 def loader(dataset, workers=2):

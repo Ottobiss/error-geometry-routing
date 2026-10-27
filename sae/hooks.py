@@ -96,14 +96,16 @@ def selection_index(n_patches, n_grid, block, patch=PATCH):
     return idx
 
 
-def pool_to_patches(x, block, n_patches_hw, patch=PATCH):
-    """x (H, W, D) on the block's grid → (Hp·Wp, D): max over the closest positions of each patch,
+def pool_to_patches(x, block, n_patches_hw, patch=PATCH, reduce="max"):
+    """x (H, W, D) on the block's grid → (Hp·Wp, D): max (or mean) over the closest positions of each patch,
     raster order of patches."""
     Hp, Wp = n_patches_hw
     rows = torch.as_tensor(selection_index(Hp, x.shape[0], block, patch), device=x.device)
     cols = torch.as_tensor(selection_index(Wp, x.shape[1], block, patch), device=x.device)
     y = x[rows][:, :, cols]                       # (Hp, m, Wp, m, D)
-    return y.amax(dim=(1, 3)).reshape(Hp * Wp, x.shape[2])
+    y = y.amax(dim=(1, 3)) if reduce == "max" else y.mean(dim=(1, 3)) if reduce == "mean" else None
+    assert y is not None, reduce
+    return y.reshape(Hp * Wp, x.shape[2])
 
 
 def draw_overlay(image, size, grids, examples, path, patch=PATCH, zoom=4):

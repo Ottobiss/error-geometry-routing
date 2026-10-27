@@ -44,12 +44,12 @@ def ckpt_path(config, block):
     return ROOT / "ckpt" / config / f"{block}.pt"
 
 
-def load_block(block, device):
+def load_block(block, device, acts=ACTS):
     """Training and held-out activations of the block (fp16 on device) and its normalisation."""
-    meta = json.loads((ACTS / "meta.json").read_text())
-    arr = np.load(ACTS / f"{block}.npy", mmap_mode="r")
-    held = np.isin(np.load(ACTS / f"{block}_frame.npy"), meta["held_out"])
-    norm = np.load(ACTS / f"{block}_norm.npz")
+    meta = json.loads((acts / "meta.json").read_text())
+    arr = np.load(acts / f"{block}.npy", mmap_mode="r")
+    held = np.isin(np.load(acts / f"{block}_frame.npy"), meta["held_out"])
+    norm = np.load(acts / f"{block}_norm.npz")
     X_train = torch.from_numpy(np.ascontiguousarray(arr[np.flatnonzero(~held)])).to(device)
     X_held = torch.from_numpy(np.ascontiguousarray(arr[np.flatnonzero(held)])).to(device)
     return X_train, X_held, norm["mean"], float(norm["scale"])
