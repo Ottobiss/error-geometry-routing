@@ -1,5 +1,0 @@
-checkpoint: runs/hyperul/best.pt
-input: ???                   # image file or directory
-out: runs/infer
-amp: false
-image_every: 20              # TensorBoard panel every N images
