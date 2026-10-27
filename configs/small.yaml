@@ -2,4 +2,4 @@
 out: runs/small
 
 data:
-  large_uncertainty: runs/large/uncertainty  # stage 2 output (src.export_uncertainty)
+  large_uncertainty: runs/large/uncertainty  # stage 2 output (src.export_uncertainty) for data.large_uncertainty_split

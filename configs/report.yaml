@@ -1,0 +1,9 @@
+# Report over all stages: python -m src.report configs/report.yaml
+large: runs/large                  # stage 1: config.yaml, metrics.jsonl, train.jsonl, train.log
+export: runs/large/uncertainty     # stage 2: summary.json, export.log
+small: runs/small                  # stage 3: as stage 1
+val: runs/benchmark_val            # stage 4: benchmark on Cityscapes val (threshold choice)
+test: runs/benchmark               # stage 5: benchmark on ACDC
+sweep: runs/sweep                  # optional: <sweep>/<stage>/trials.jsonl of src.sweep
+out: runs/report                   # report.md, figures/, panels/, logs/, metrics.json
+max_launch_rate: 0.5               # threshold: the best routed mIoU on val with B2 on at most this share of images

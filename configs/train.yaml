@@ -1,5 +1,5 @@
 seed: 0
-out: runs/hyperul
+out: ???                     # set by configs/large.yaml (stage 1) or configs/small.yaml (stage 3)
 
 data:
   root: ???                  # Cityscapes root with leftImg8bit/ and gtFine/
@@ -9,27 +9,25 @@ data:
   batch_size: 8              # total over all GPUs (torchrun splits it between the processes)
   workers: 8                 # total over all GPUs
   large_uncertainty: null    # src.export_uncertainty output: the model also learns the large model's uncertainty
+  large_uncertainty_split: val  # its images teach only that (segmentation is learned on train)
 
 model:
   variant: b0                # MiT encoder: b0 | b2
-  pretrained: nvidia/segformer-b0-finetuned-cityscapes-1024-1024  # HF hub id or local path, null = random init
-  freeze: true               # train only the last decoder conv and the hyperbolic MLR; false: all (from nvidia/mit-b0)
-  embed_dim: 64
-  manifold: poincare         # model of hyperbolic space: poincare | lorentz
+  pretrained: nvidia/segformer-b0-finetuned-cityscapes-1024-1024  # HF hub id or local path; only its last conv trains
+  manifold: poincare         # model of hyperbolic space: poincare | lorentz; its coordinates are the class logits
   c: 0.7                     # the hyperbolic space has curvature -c
   patch: 32                  # uncertainties are averaged over patch x patch pixel squares, 1 = per pixel
 
 loss:
   t: 1.869                   # uncertainty weight 1 / log(t + d), Eq. 11
-  hr: 1.0                    # OHUEM, Eq. 13; 1.0 keeps all pixels
+  hr: 1.0                    # OHUEM: share of the most uncertain labelled pixels of each image in the loss
   class_weights: null        # optional w_k, Eq. 12
   large_unc_weight: 1.0      # weight of the loss between the predicted and the exported large-model uncertainty
   large_unc_loss: bce        # bce | mse | l1; the prediction is always the sigmoid of the extra output
 
 train:
   iters: 80000
-  lr: 1.5e-4                 # encoder (not trained with model.freeze)
-  head_lr_mult: 10           # decoder and hyperbolic MLR
+  lr: 1.5e-3                 # of the last decoder conv, the only trained layer
   weight_decay: 0.01
   warmup: 1000
   poly_power: 0.9

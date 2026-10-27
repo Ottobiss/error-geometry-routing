@@ -1,0 +1,18 @@
+# Test: python -m src.benchmark configs/benchmark.yaml root=/data/acdc_cityscapes
+# Threshold choice: the same with root=/data/cityscapes split=val out=runs/benchmark_val
+small: runs/small/best.pt    # B0 after fine-tuning (with the large-uncertainty head); B0 without it from its config
+large: runs/large/best.pt    # B2 after fine-tuning; B2 without it from its config
+root: ???                    # dataset root in the Cityscapes layout
+split: [train, val]          # all labelled ACDC; results also per <city> folder (condition)
+out: runs/benchmark          # benchmark.json and TensorBoard
+# routing: B2 replaces B0 on the images whose gain score is above a threshold (>= 0: TensorBoard step = 100 x threshold)
+thresholds: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+budgets: [0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0]  # shares of images given to B2 / of patches flagged
+patch: 32                    # patch size of the decisions, error metrics and image scores (~2048 patches per frame)
+top: 0.1                     # image score: mean over this share of the most uncertain patches
+cost_ratio: 5.7              # B2 / B0 compute at full resolution (FLOPs), for the cost of B2 launches
+bootstrap: 1000              # resamples of images for confidence intervals and p-values
+images: 2                    # TensorBoard panels per <city> folder
+seed: 0
+amp: false
+workers: 4

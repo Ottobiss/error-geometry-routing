@@ -1,6 +1,6 @@
 checkpoint: runs/large/best.pt
-root: ???                    # Cityscapes root
-split: train
+root: ???                    # dataset root in the Cityscapes layout
+split: val                   # unseen by the large model; = data.large_uncertainty_split of the small model
 out: runs/large/uncertainty  # = data.large_uncertainty of the small model
 stride: 4                    # maps are saved at 1/stride resolution
 amp: false
