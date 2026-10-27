@@ -2,14 +2,14 @@
 Networks: A Survey" (TPAMI 2022): the Poincaré ball (used by the HyperUL paper) and the Lorentz (hyperboloid) model.
 
 Each model has its own origin, metric, exponential map at the origin (with respect to its own metric) and distance
-formula. The models are isometric: the ball has metric 4I at the origin, so it equals the Lorentz model with v, p, a
-doubled. In float32 they differ in where points saturate: sqrt(c) * distance <= max_rho, 7.6 for the ball and 15 for
-the hyperboloid, which has no boundary.
+formula. The models are isometric: the ball has metric 4I at the origin, so it equals the Lorentz model with v doubled,
+and distances to the origin agree up to where points saturate in float32: sqrt(c) * distance <= max_rho, 7.6 for the
+ball and 15 for the hyperboloid, which has no boundary. Their coordinates differ: the ball's are bounded by 1/sqrt(c),
+the hyperboloid's space-like ones grow like sinh of the distance.
 """
 import math
 
 import torch
-import torch.nn as nn
 
 EPS = 1e-5
 ACOSH_EPS = 1e-6  # acosh arguments are kept >= 1 + ACOSH_EPS for finite gradients
@@ -45,6 +45,10 @@ class Manifold:
     def origin(self, x):
         return torch.zeros_like(x[:1])
 
+    def coordinates(self, x):
+        """n coordinates of a point of the n-dimensional space (the class logits of HyperSegFormer)."""
+        return x
+
     def geodesic(self, rho, u):
         """Point at distance rho / sqrt(c) from the origin on the geodesic with unit direction u."""
         raise NotImplementedError
@@ -77,6 +81,9 @@ class Lorentz(Manifold):
         o[:, 0] = 1 / self.sqrt_c
         return o
 
+    def coordinates(self, x):
+        return x[:, 1:]  # space-like; the time-like x_0 follows from them
+
     def dist(self, x, y):
         minkowski = (x[:, 1:] * y[:, 1:]).sum(1) - x[:, 0] * y[:, 0]
         return acosh(-self.c * minkowski) / self.sqrt_c
@@ -90,57 +97,3 @@ def hyperbolic_uncertainty(dist):
     dist: (B, H, W)."""
     d_max = dist.flatten(1).amax(1).clamp_min(EPS)
     return 1 - dist / d_max[:, None, None]
-
-
-class HyperbolicMLR(nn.Module):
-    """Hyperbolic MLR (Ganea et al., 2018): logit_k = |a_k| * signed distance to the hyperplane through
-    p_k = exp_0(p_k') orthogonal to a_k, the parallel transport of a_k' from the origin to p_k.
-
-    Computed natively in each model: on gyroplanes (Möbius addition) in the Poincaré ball, with Lorentz parallel
-    transport and hyperplanes <a_k, x>_L = 0 on the hyperboloid.
-    """
-
-    def __init__(self, dim, num_classes, manifold):
-        super().__init__()
-        self.manifold = manifold
-        self.p = nn.Parameter(torch.empty(num_classes, dim))
-        self.a = nn.Parameter(torch.empty(num_classes, dim))
-        nn.init.kaiming_uniform_(self.p, a=5 ** 0.5)
-        nn.init.kaiming_uniform_(self.a, a=5 ** 0.5)
-
-    def forward(self, x):
-        return self.gyroplanes(x) if isinstance(self.manifold, Poincare) else self.hyperboloid(x)
-
-    def gyroplanes(self, z):
-        """(B, D, H, W) ball points; -p ⊕ z is expanded through inner products, no (B, K, D, H, W) tensor."""
-        c, sqrt_c = self.manifold.c, self.manifold.sqrt_c
-        p = self.manifold.expmap0(self.p)
-        a = self.a * (1 - c * p.pow(2).sum(1, keepdim=True))
-        pp = p.pow(2).sum(1)[:, None, None]
-        pa = (p * a).sum(1)[:, None, None]
-        a_norm = a.norm(dim=1).clamp_min(EPS)[:, None, None]
-
-        zz = z.pow(2).sum(1, keepdim=True)
-        pz = torch.einsum("bdhw,kd->bkhw", z, p)
-        az = torch.einsum("bdhw,kd->bkhw", z, a)
-
-        # w = -p ⊕ z = (beta * z - alpha * p) / gamma
-        alpha = 1 - 2 * c * pz + c * zz
-        beta = 1 - c * pp
-        gamma = 1 - 2 * c * pz + c ** 2 * pp * zz
-        wa = (beta * az - alpha * pa) / gamma
-        ww = (beta ** 2 * zz - 2 * alpha * beta * pz + alpha ** 2 * pp) / gamma ** 2
-
-        lam = 2 / (1 - c * pp)
-        return lam * a_norm / sqrt_c * torch.asinh(2 * sqrt_c * wa / ((1 - c * ww).clamp_min(EPS) * a_norm))
-
-    def hyperboloid(self, x):
-        """(B, D + 1, H, W) points on the hyperboloid; hyperplane k is <a_k, x>_L = 0."""
-        c, sqrt_c = self.manifold.c, self.manifold.sqrt_c
-        p = self.manifold.expmap0(self.p)
-        p_time, p_space = p[:, :1], p[:, 1:]
-        transport = c * (p_space * self.a).sum(1, keepdim=True) / (1 + sqrt_c * p_time)
-        a_time, a_space = transport * (1 / sqrt_c + p_time), self.a + transport * p_space
-        inner = torch.einsum("bdhw,kd->bkhw", x[:, 1:], a_space) - x[:, :1] * a_time[:, 0, None, None]
-        norm = self.a.norm(dim=1).clamp_min(EPS)[:, None, None]  # parallel transport keeps |a_k|
-        return norm / sqrt_c * torch.asinh(sqrt_c * inner / norm)

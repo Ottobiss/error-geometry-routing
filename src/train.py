@@ -1,10 +1,9 @@
-"""HyperUL training of one SegFormer on Cityscapes; with data.large_uncertainty (stage 3) the model also learns
-the large model's exported uncertainty.
+"""HyperUL training of the last decoder conv of one SegFormer on Cityscapes; with data.large_uncertainty (stage 3)
+the model also learns the large model's uncertainty exported for data.large_uncertainty_split.
 
-    python -m src.train configs/train.yaml data.root=/data/cityscapes                    # HyperUL baseline
     python -m src.train configs/train.yaml configs/large.yaml data.root=/data/cityscapes  # stage 1: large model
     python -m src.train configs/train.yaml configs/small.yaml data.root=/data/cityscapes  # stage 3: small model
-    torchrun --standalone --nproc_per_node=2 -m src.train configs/train.yaml ...          # any of them on 2 GPUs
+    torchrun --standalone --nproc_per_node=2 -m src.train configs/train.yaml ...          # either of them on 2 GPUs
     tensorboard --logdir runs        # parallel monitoring
 """
 import argparse
@@ -27,6 +26,7 @@ from tqdm import tqdm
 from src.config import load_config
 from src.data import CLASSES, IGNORE, Cityscapes, colorize, denormalize, heatmap, make_panel
 from src.hyperbolic import hyperbolic_uncertainty
+from src.logs import keep_log
 from src.loss import HyperUL, RoutingLoss
 from src.model import build_model
 
@@ -36,7 +36,6 @@ def parse_args():
     p.add_argument("config")
     p.add_argument("overrides", nargs="*", help="more YAML files and dotted overrides, e.g. data.root=/data/cityscapes")
     p.add_argument("--resume")
-    p.add_argument("--eval-only", action="store_true")
     return p.parse_intermixed_args()
 
 
@@ -109,9 +108,13 @@ def endless(loader):
 
 
 def make_loaders(data, world=1):
-    """data.batch_size and data.workers are totals: each of the world processes gets an equal share."""
+    """data.batch_size and data.workers are totals: each of the world processes gets an equal share. With
+    data.large_uncertainty the images of data.large_uncertainty_split join train: they teach only the prediction
+    of the large model's uncertainty, train images only segmentation."""
     assert data.batch_size % world == 0, f"data.batch_size={data.batch_size} is not divisible by {world} GPUs"
-    train_set = Cityscapes(data.root, "train", data.crop, data.base_size, data.scale_range, data.large_uncertainty)
+    splits = ["train", data.large_uncertainty_split] if data.large_uncertainty else "train"
+    train_set = Cityscapes(data.root, splits, data.crop, data.base_size, data.scale_range, data.large_uncertainty,
+                           data.large_uncertainty_split)
     sampler = DistributedSampler(train_set, drop_last=True) if world > 1 else None
     workers = data.workers // world
     train_loader = DataLoader(train_set, data.batch_size // world, shuffle=sampler is None, sampler=sampler,
@@ -133,14 +136,6 @@ def setup_distributed():
     return int(os.environ["RANK"]), local_rank, world
 
 
-def param_groups(model, lr, head_lr_mult):
-    """Encoder at lr; decoder and hyperbolic MLR at lr * head_lr_mult. Frozen parameters are left out."""
-    head = [*model.net.decode_head.parameters(), *model.mlr.parameters()]
-    groups = [{"params": [p for p in params if p.requires_grad], "lr": group_lr}
-              for params, group_lr in ((model.net.segformer.parameters(), lr), (head, lr * head_lr_mult))]
-    return [group for group in groups if group["params"]]
-
-
 def poly_scheduler(optimizer, train):
     """Linear warmup times polynomial decay over train.iters iterations."""
     warmup, iters, power = train.warmup, train.iters, train.poly_power
@@ -152,6 +147,13 @@ def main():
     args = parse_args()
     cfg = load_config(args.config, args.overrides)
     rank, local_rank, world = setup_distributed()
+    out = Path(cfg.out)
+    if rank == 0:
+        out.mkdir(parents=True, exist_ok=True)
+        keep_log(out / "train.log")
+        if not args.resume:  # a new run: its metric files start empty
+            for name in ("metrics.jsonl", "train.jsonl"):
+                (out / name).unlink(missing_ok=True)
     torch.manual_seed(cfg.seed + rank)  # different augmentations per process; DDP copies rank 0's weights
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
@@ -161,7 +163,7 @@ def main():
     model = build_model(cfg, len(CLASSES)).to(device)
     criterion = RoutingLoss(HyperUL(cfg.loss.t, cfg.loss.hr, IGNORE, cfg.loss.class_weights),
                             cfg.loss.large_unc_weight, cfg.loss.large_unc_loss).to(device)
-    optimizer = torch.optim.AdamW(param_groups(model, cfg.train.lr, cfg.train.head_lr_mult),
+    optimizer = torch.optim.AdamW(model.net.decode_head.classifier.parameters(), cfg.train.lr,
                                   weight_decay=cfg.train.weight_decay)
     scheduler = poly_scheduler(optimizer, cfg.train)
 
@@ -177,14 +179,7 @@ def main():
     if world > 1:
         train_model = DistributedDataParallel(model, device_ids=[local_rank] if device.type == "cuda" else None)
 
-    out = Path(cfg.out)
-    out.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(out, flush_secs=30) if rank == 0 else None
-    if args.eval_only:
-        if rank == 0:
-            evaluate(model, val_loader, writer, start, cfg.train.amp, cfg.log.val_images)
-            writer.close()
-        return
     if rank == 0:
         OmegaConf.save(cfg, out / "config.yaml")
         writer.add_text("config", f"```yaml\n{OmegaConf.to_yaml(cfg)}```")
@@ -209,13 +204,16 @@ def main():
                 running[key] += value.detach()
             if step % cfg.log.every == 0:
                 elapsed, tic = time.perf_counter() - tic, time.perf_counter()
-                for key, value in running.items():
-                    writer.add_scalar(f"train/{key}", value.item() / cfg.log.every, step)
-                writer.add_scalar("train/lr", scheduler.get_last_lr()[0], step)
-                writer.add_scalar("train/img_per_s", cfg.log.every * cfg.data.batch_size / elapsed, step)
+                row = {f"train/{key}": value.item() / cfg.log.every for key, value in running.items()}
+                row |= {"train/lr": scheduler.get_last_lr()[0],
+                        "train/img_per_s": cfg.log.every * cfg.data.batch_size / elapsed}
                 if device.type == "cuda":
-                    writer.add_scalar("train/mem_gb", torch.cuda.max_memory_allocated() / 2 ** 30, step)
+                    row["train/mem_gb"] = torch.cuda.max_memory_allocated() / 2 ** 30
+                for tag, value in row.items():
+                    writer.add_scalar(tag, value, step)
                 writer.add_histogram("train/dist", dist.detach()[:, ::4, ::4], step)
+                with open(out / "train.jsonl", "a") as f:  # for scripts, e.g. src.report
+                    f.write(json.dumps({"step": step, "time": time.time()} | row) + "\n")
                 running.clear()
 
         if step % cfg.log.val_every == 0 or step == iters:

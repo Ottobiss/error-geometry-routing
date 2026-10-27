@@ -1,7 +1,8 @@
 """Random search over the main hyperparameters of one stage, on all visible GPUs.
 
     python -m src.sweep configs/sweep.yaml stage=large root=/data/cityscapes  # stage 1 (B2), scored on val
-    python -m src.sweep configs/sweep.yaml stage=small root=/data/cityscapes  # stage 3 (B0), scored by eval_router
+    python -m src.sweep configs/sweep.yaml stage=small root=/data/cityscapes  # stage 3 (B0), scored by the routing
+                                                                              # of src.benchmark on val
 
 Trial 0 keeps the defaults of train.yaml, the others sample configs/sweep.yaml:space. The per-GPU batch is the
 largest that fits: training steps and a full-resolution validation forward are probed in separate processes.
@@ -18,12 +19,12 @@ import time
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 
 from src.config import load_config
 from src.data import CLASSES, IGNORE, Cityscapes
 from src.loss import HyperUL, RoutingLoss
 from src.model import build_model
-from src.train import param_groups
 
 STAGES = {"large": ["configs/train.yaml", "configs/large.yaml"], "small": ["configs/train.yaml", "configs/small.yaml"]}
 SHOWN = {"val/mIoU": "mIoU", "val/hyperbolic_ECE": "ECE", "gap": "gap", "small/large_unc_mae": "unc_mae",
@@ -39,15 +40,18 @@ def parse_args():
 
 
 def probe_step(cfg, batch):
-    """Prints the peak reserved GPU memory and the GPU size (GiB) of two training steps at this per-GPU batch
-    and a validation forward at full resolution; zeros on CPU."""
+    """Prints the peak reserved GPU memory (GiB) of two training steps at this per-GPU batch and a validation
+    forward at full resolution, and the free memory of the fullest visible GPU before them (e.g. one that also
+    drives a display); zeros on CPU."""
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cuda, gib = device.type == "cuda", 2 ** 30
+    free = min(torch.cuda.mem_get_info(i)[0] for i in range(torch.cuda.device_count())) / gib if cuda else 0.0
     model = build_model(cfg, len(CLASSES), pretrained=False).to(device)
     criterion = RoutingLoss(HyperUL(cfg.loss.t, cfg.loss.hr, IGNORE, cfg.loss.class_weights),
                             cfg.loss.large_unc_weight, cfg.loss.large_unc_loss).to(device)
-    optimizer = torch.optim.AdamW(param_groups(model, cfg.train.lr, cfg.train.head_lr_mult))
+    optimizer = torch.optim.AdamW(model.net.decode_head.classifier.parameters(), cfg.train.lr)
     h, w = cfg.data.crop
     image, label = torch.randn(batch, 3, h, w, device=device), torch.randint(len(CLASSES), (batch, h, w), device=device)
     large_unc = torch.rand(batch, h, w, device=device) if cfg.data.large_uncertainty else None
@@ -61,13 +65,11 @@ def probe_step(cfg, batch):
     model.eval()
     with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=cfg.train.amp):
         model(Cityscapes(cfg.data.root, "val")[0][0][None].to(device))
-    cuda, gib = device.type == "cuda", 2 ** 30
-    print(json.dumps({"peak": torch.cuda.max_memory_reserved() / gib if cuda else 0.0,
-                      "total": torch.cuda.get_device_properties(device).total_memory / gib if cuda else 0.0}))
+    print(json.dumps({"peak": torch.cuda.max_memory_reserved() / gib if cuda else 0.0, "free": free}))
 
 
 def probe(train_args, batch):
-    """Peak memory and GPU size (GiB) at this per-GPU batch in a fresh process; None if it runs out of memory."""
+    """Peak and free memory (GiB) at this per-GPU batch in a fresh process; None if it runs out of memory."""
     run = subprocess.run([sys.executable, "-m", "src.sweep", *train_args, "--probe", str(batch)],
                          capture_output=True, text=True)
     if run.returncode == 0:
@@ -78,12 +80,12 @@ def probe(train_args, batch):
 
 
 def largest_batch(train_args, headroom):
-    """Largest per-GPU batch that keeps headroom GiB of the GPU free: linear fit of the probes at 2 and 4 images,
-    then checked and reduced by 10% until it fits."""
+    """Largest per-GPU batch that keeps headroom GiB free on the fullest GPU: linear fit of the probes at 2 and 4
+    images, then checked and reduced by 10% until it fits."""
     two, four = probe(train_args, 2), probe(train_args, 4)
     if two is None:
         sys.exit("a per-GPU batch of 2 does not fit")
-    budget = two["total"] - headroom
+    budget = two["free"] - headroom
     if four is None or four["peak"] > budget:
         return 2
     per_image = max((four["peak"] - two["peak"]) / 2, 0.05)
@@ -117,7 +119,8 @@ def run(command, log):
 
 
 def run_trial(cfg, gpus, train_args, out):
-    """Trains (resuming from last.pt if present) and, for the small stage, evaluates routing -> metrics or None."""
+    """Trains (resuming from last.pt if present) and, for the small stage, runs the benchmark on val -> metrics or
+    None."""
     launcher = [sys.executable] if gpus == 1 else [
         sys.executable, "-m", "torch.distributed.run", "--standalone", f"--nproc_per_node={gpus}"]
     resume = ["--resume", str(out / "last.pt")] if (out / "last.pt").exists() else []
@@ -127,23 +130,27 @@ def run_trial(cfg, gpus, train_args, out):
         metrics = json.loads((out / "metrics.jsonl").read_text().splitlines()[-1])  # the last validation
         metrics["gap"] = metrics["val/hyperbolic_uncertainty_wrong"] - metrics["val/hyperbolic_uncertainty_correct"]
         if cfg.stage == "small":
-            if not run([sys.executable, "-m", "src.eval_router", "configs/eval_router.yaml", f"root={cfg.root}",
-                        f"small={out / 'last.pt'}", f"large={cfg.large_checkpoint}", f"out={out / 'eval_router'}",
-                        f"thresholds={list(cfg.thresholds)}", f"workers={cfg.workers}"], log):
+            amp = OmegaConf.load(out / "config.yaml").train.amp  # evaluate in the precision of training
+            if not run([sys.executable, "-m", "src.benchmark", "configs/benchmark.yaml", f"root={cfg.root}",
+                        "split=val", f"small={out / 'last.pt'}", f"large={cfg.large_checkpoint}",
+                        f"out={out / 'benchmark'}", f"thresholds={list(cfg.thresholds)}", f"workers={cfg.workers}",
+                        f"amp={amp}"], log):
                 return None
-            metrics |= routing(json.loads((out / "eval_router" / "results.json").read_text()), cfg.max_launch_rate)
+            results = json.loads((out / "benchmark" / "benchmark.json").read_text())["all"]
+            metrics |= routing(results, cfg.max_launch_rate)
     return metrics
 
 
 def routing(results, max_launch):
     """Best routed mIoU among the thresholds that launch the large model on at most max_launch of the images;
     the small model alone if none does."""
-    summary = results["summary"]
-    never = {"threshold": None, "route/launch_rate": 0.0, "routed/mIoU": summary["small/mIoU"]}
-    best = max((r for r in results["thresholds"] if r["route/launch_rate"] <= max_launch),
-               key=lambda r: r["routed/mIoU"], default=never)
-    return ({key: summary[key] for key in ("large/mIoU", "small/large_unc_mae", "route/fixable_pixels")}
-            | {key: best[key] for key in never})
+    small = {"threshold": None, "launch_rate": 0.0, "mIoU": results["models"]["B0_ft"]["mIoU"]}
+    best = max((r for r in results["routing"]["thresholds"] if r["launch_rate"] <= max_launch),
+               key=lambda r: r["mIoU"], default=small)
+    return {"large/mIoU": results["models"]["B2_ft"]["mIoU"],
+            "small/large_unc_mae": results["uncertainty"]["large_unc_mae"],
+            "route/fixable_pixels": results["routing"]["fixable_pixels"],
+            "threshold": best["threshold"], "route/launch_rate": best["launch_rate"], "routed/mIoU": best["mIoU"]}
 
 
 def score(cfg, metrics):
@@ -199,7 +206,7 @@ def main():
         batch = cfg.batch_per_gpu * gpus
     elif trials:  # keep the trials comparable
         batch = next(iter(trials.values()))["batch"]
-    elif torch.cuda.is_available():  # probed with the largest numeric choices of the space, e.g. embed_dim
+    elif torch.cuda.is_available():  # probed with the largest numeric choices of the space
         heavy = {e.key: max(e.choice) for e in space if "choice" in e and not any(isinstance(v, str) for v in e.choice)}
         batch = largest_batch([*base, *dotted(heavy), *after], cfg.headroom_gb) * gpus
     else:

@@ -6,8 +6,9 @@ from src.hyperbolic import hyperbolic_uncertainty
 
 
 class HyperUL(nn.Module):
-    """Hyperbolic Uncertainty Loss (Eq. 14): cross-entropy weighted by uw = 1 / log(t + d) (Eq. 10-11)
-    and computed only on the pixels selected by OHUEM (Eq. 13)."""
+    """Hyperbolic Uncertainty Loss (Eq. 14): cross-entropy weighted by uw = 1 / log(t + d) (Eq. 10-11) on the pixels
+    selected by OHUEM: the hr share of the most uncertain labelled pixels of each image, as the text describes it
+    (Eq. 13 as printed keeps every pixel)."""
 
     def __init__(self, t=1.869, hr=1.0, ignore_index=255, class_weights=None):
         super().__init__()
@@ -21,10 +22,11 @@ class HyperUL(nn.Module):
         d = 1 - hyperbolic_uncertainty(dist.detach())
         weight = 1 / torch.log(self.t + d)
 
-        # Eq. 13: keep pixels below the threshold between the least and the most confident pixel of the image
-        d_min = d.flatten(1).amin(1)[:, None, None]
-        valid = target != self.ignore_index
-        keep = valid & (d <= d_min + self.hr * (1 - d_min))
+        valid = keep = target != self.ignore_index
+        if self.hr < 1:  # OHUEM: per image, the labelled pixels up to the hr quantile of d, the least confident ones
+            ordered = torch.where(valid, d, torch.inf).flatten(1).sort(1).values
+            last = (self.hr * valid.flatten(1).sum(1)).ceil().long().clamp_min(1) - 1
+            keep = valid & (d <= ordered.gather(1, last[:, None])[:, :, None])
 
         n = keep.sum().clamp_min(1)
         loss = (weight * ce * keep).sum() / n
@@ -45,8 +47,8 @@ LARGE_UNC_LOSSES = {  # logit z of the predicted large-model uncertainty, target
 
 class RoutingLoss(nn.Module):
     """HyperUL as in the paper (segmentation weighted by the own hyperbolic uncertainty). Given the large model's
-    uncertainty exported by src.export_uncertainty, also a loss (bce | mse | l1) between it and the small model's
-    prediction of it, the sigmoid of the extra output."""
+    uncertainty exported by src.export_uncertainty (NaN where it is no target), also a loss (bce | mse | l1) between it
+    and the small model's prediction of it, the sigmoid of the extra output."""
 
     def __init__(self, hyperul, large_weight=1.0, large_loss="bce"):
         super().__init__()
@@ -56,8 +58,8 @@ class RoutingLoss(nn.Module):
         loss, stats = self.hyperul(logits, dist, target)
         if large_unc is None:
             return loss, stats
-        valid = target != self.hyperul.ignore_index
-        n = valid.sum().clamp_min(1)
+        valid = ~large_unc.isnan()
+        n, large_unc = valid.sum().clamp_min(1), large_unc.nan_to_num()
         stats["large_unc"] = (self.large_loss(large_pred, large_unc) * valid).sum() / n
         stats["large_unc_mae"] = ((large_pred.detach().sigmoid() - large_unc).abs() * valid).sum() / n
         return loss + self.large_weight * stats["large_unc"], stats

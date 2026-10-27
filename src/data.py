@@ -2,7 +2,6 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import tv_tensors
 from torchvision.io import ImageReadMode, read_image
@@ -25,19 +24,22 @@ PALETTE[:len(COLORS)] = torch.tensor(COLORS, dtype=torch.uint8)
 
 
 class Cityscapes(Dataset):
-    """leftImg8bit/<split>/<city>/*_leftImg8bit.png + gtFine/<split>/<city>/*_gtFine_labelIds.png
+    """leftImg8bit/<split>/<city>/*_leftImg8bit.png + gtFine/<split>/<city>/*_gtFine_labelIds.png; split may be a list,
+    e.g. [train, val] for all labelled ACDC.
 
     crop (H, W) enables training augmentation: random resize of base_size (W, H) by scale_range, crop, flip.
-    large_uncertainty: output dir of src.export_uncertainty; items then also carry the large model's uncertainty,
-    augmented together with the label.
+    large_uncertainty: output dir of src.export_uncertainty for uncertainty_split. Items then also carry the large
+    model's uncertainty, augmented together with the label, NaN where it is no target: images of uncertainty_split
+    have it on their labelled pixels, and only images of the train split keep their labels (the others get 255).
     """
 
-    def __init__(self, root, split, crop=None, base_size=(2048, 1024), scale_range=(0.5, 2.0), large_uncertainty=None):
-        self.images = sorted(Path(root, "leftImg8bit", split).glob("*/*_leftImg8bit.png"))
-        self.labels = [Path(root, "gtFine", split, p.parent.name, p.name.replace("leftImg8bit", "gtFine_labelIds"))
+    def __init__(self, root, split, crop=None, base_size=(2048, 1024), scale_range=(0.5, 2.0), large_uncertainty=None,
+                 uncertainty_split="val"):
+        splits = dict.fromkeys([split] if isinstance(split, str) else split)
+        self.images = sorted(p for s in splits for p in Path(root, "leftImg8bit", s).glob("*/*_leftImg8bit.png"))
+        self.labels = [Path(root, "gtFine", *p.parts[-3:-1], p.name.replace("leftImg8bit", "gtFine_labelIds"))
                        for p in self.images]
-        self.large_unc = ([Path(large_uncertainty, split, p.parent.name, p.name) for p in self.images]
-                          if large_uncertainty else None)
+        self.large_uncertainty, self.uncertainty_split = large_uncertainty, uncertainty_split
         augment = [
             v2.ScaleJitter(tuple(base_size), tuple(scale_range)),
             v2.RandomCrop(tuple(crop), pad_if_needed=True, fill={tv_tensors.Image: 0, tv_tensors.Mask: IGNORE}),
@@ -51,14 +53,21 @@ class Cityscapes(Dataset):
     def __getitem__(self, i):
         image = tv_tensors.Image(read_image(str(self.images[i]), ImageReadMode.RGB))
         label = tv_tensors.Mask(ID_TO_TRAIN[read_image(str(self.labels[i]))[0].long()])
-        if self.large_unc is None:
+        if self.large_uncertainty is None:
             image, label = self.transform(image, label)
             return image.as_subclass(torch.Tensor), label.as_subclass(torch.Tensor).long()
 
-        unc = read_image(str(self.large_unc[i]))[None].float() / 255  # saved at reduced resolution
-        unc = tv_tensors.Mask(F.interpolate(unc, label.shape, mode="bilinear", align_corners=False)[0, 0])
-        image, label, unc = self.transform(image, label, unc)
-        return image.as_subclass(torch.Tensor), label.as_subclass(torch.Tensor).long(), unc.as_subclass(torch.Tensor)
+        split, city, name = self.images[i].parts[-3:]
+        unc = torch.full(label.shape, torch.nan)
+        if split == self.uncertainty_split:  # saved at reduced resolution
+            saved = read_image(str(Path(self.large_uncertainty, split, city, name)))[None].float() / 255
+            unc = F.interpolate(saved, label.shape, mode="bilinear", align_corners=False)[0, 0]
+        image, label, unc = self.transform(image, label, tv_tensors.Mask(unc))
+        label, unc = label.as_subclass(torch.Tensor).long(), unc.as_subclass(torch.Tensor)
+        unc = torch.where(label == IGNORE, torch.nan, unc)  # a target on labelled pixels only (not on padding)
+        if split != "train":  # segmentation is learned on train only
+            label = torch.full_like(label, IGNORE)
+        return image.as_subclass(torch.Tensor), label, unc
 
 
 def colorize(label):
@@ -80,7 +89,3 @@ def denormalize(image):
 def make_panel(tiles, cols, scale=0.5):
     grid = make_grid(tiles, nrow=cols, padding=8, pad_value=255)
     return F.interpolate(grid[None].float(), scale_factor=scale, mode="area")[0].byte()
-
-
-def save_rgb(image, path):
-    Image.fromarray(image.permute(1, 2, 0).numpy()).save(path)
