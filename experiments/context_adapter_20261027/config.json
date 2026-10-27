@@ -1,0 +1,46 @@
+{
+  "schema": "e9-k4-five-state-adapter-v1",
+  "seed": 0,
+  "input": "B0 normalized encoder F3 (stage index 2 output)",
+  "input_channels": 160,
+  "target_channels": 320,
+  "hidden": 128,
+  "target_states": [
+    "s5",
+    "s15",
+    "s25",
+    "s35",
+    "final"
+  ],
+  "epochs": 20,
+  "patience": 4,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "batch": 2,
+  "budgets": [
+    0.1,
+    0.2
+  ],
+  "evaluation_domains": [
+    "cs_test"
+  ],
+  "methods": [
+    "rank"
+  ],
+  "teacher_assisted": true,
+  "keep_real_b5_early_stages": true,
+  "routed_entry": "real B5",
+  "loss": "0.5 mean normalized MSE over four contexts + 0.5 normalized final MSE",
+  "fit_domains": [
+    "cs_fit"
+  ],
+  "size": [
+    512,
+    1024
+  ],
+  "compute_benchmark": false,
+  "source_sha256": "ee5c2a188a59ee983375451c4f9aa2132be7daffe4e4b6582718c04f90748208",
+  "common_sha256": "01d78ebc2870018f86e175d9dc7c83af72908481f10855c4b9e00031685d3f02",
+  "tile_features_sha256": "fc5c7b985fa16d6c83cffdda53c112cec524a11214d6d0c6177811d0ba0c4dbf",
+  "previous_split_sha256": "59febfbe1dd595abbedae9349e273f4912c028ce69c05b42e0fc7caf8248f55c"
+}

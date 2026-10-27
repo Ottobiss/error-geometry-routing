@@ -1,0 +1,10 @@
+{
+  "complete": true,
+  "best_epoch": 20,
+  "val_weighted_normalized_mse": 0.5656920766830444,
+  "parameters": 227008,
+  "train_frames": 217,
+  "val_frames": 50,
+  "checkpoint_sha256": "ba73ebae89b76dd36d18bcaa069c13022f028976c183fe7609fccc75692b547b",
+  "normalization_sha256": "507dd2bf62d46f4b46a002880460c65e51619d31758c4a5a6b8621d51e187a88"
+}
