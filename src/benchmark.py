@@ -56,7 +56,7 @@ def untrained(path):
 
 
 def original_pred(model, x):
-    """Prediction of the pretrained SegFormer itself: its logits (the classifier is only scaled), upsampled."""
+    """Prediction of the pretrained SegFormer itself: its raw logits, upsampled."""
     logits = model.net(pixel_values=x).logits[:, :K].float()
     return F.interpolate(logits, x.shape[-2:], mode="bilinear", align_corners=False)[0].argmax(0)
 

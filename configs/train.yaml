@@ -16,6 +16,7 @@ model:
   pretrained: nvidia/segformer-b0-finetuned-cityscapes-1024-1024  # HF hub id or local path; only its last conv trains
   manifold: poincare         # model of hyperbolic space: poincare | lorentz; its coordinates are the class logits
   c: 0.7                     # the hyperbolic space has curvature -c
+  classifier_scale: 0.02     # class outputs x this before the exp map: where NVIDIA's logits (tens) put the embeddings
   patch: 32                  # uncertainties are averaged over patch x patch pixel squares, 1 = per pixel
 
 loss:

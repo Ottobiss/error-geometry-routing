@@ -22,10 +22,10 @@ from src.config import load_config
 
 NAMES = {"all": "все кадры", "fog": "туман", "night": "ночь", "rain": "дождь", "snow": "снег"}
 FINE_TUNED = ("B0_ft", "B2_ft")
-TRAIN_KEYS = ("model.variant", "model.pretrained", "model.manifold", "model.c", "model.patch", "loss.t", "loss.hr",
-              "loss.class_weights", "loss.large_unc_weight", "loss.large_unc_loss", "data.batch_size", "data.crop",
-              "data.large_uncertainty", "data.large_uncertainty_split", "train.iters", "train.lr",
-              "train.weight_decay", "train.warmup", "train.amp", "seed")
+TRAIN_KEYS = ("model.variant", "model.pretrained", "model.manifold", "model.c", "model.classifier_scale", "model.patch",
+              "loss.t", "loss.hr", "loss.class_weights", "loss.large_unc_weight", "loss.large_unc_loss",
+              "data.batch_size", "data.crop", "data.large_uncertainty", "data.large_uncertainty_split", "train.iters",
+              "train.lr", "train.weight_decay", "train.warmup", "train.amp", "seed")
 BENCHMARK_KEYS = ("small", "large", "root", "split", "thresholds", "budgets", "patch", "top", "cost_ratio",
                   "bootstrap", "amp")
 
@@ -41,9 +41,9 @@ train Cityscapes.
 
 FORMULAS = r"""## Формулы
 
-**Гиперболическое вложение.** Последний 1×1 conv SegFormer даёт для пикселя вектор $v \in \mathbb{R}^K$, $K = 19$,
-по координате на класс. Он отображается в шар Пуанкаре кривизны $-c$; координаты точки служат логитами, а расстояние
-до начала координат — мерой уверенности:
+**Гиперболическое вложение.** Выход последнего 1×1 conv SegFormer, умноженный на `classifier_scale`, даёт для
+пикселя вектор $v \in \mathbb{R}^K$, $K = 19$, по координате на класс. Он отображается в шар Пуанкаре кривизны $-c$;
+координаты точки служат логитами, а расстояние до начала координат — мерой уверенности:
 
 $$
 x = \exp_0^c(v) = \tanh\left(\sqrt{c}\,\lVert v \rVert\right) \frac{v}{\sqrt{c}\,\lVert v \rVert}, \qquad

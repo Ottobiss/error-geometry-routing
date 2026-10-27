@@ -39,6 +39,8 @@ class Cityscapes(Dataset):
         self.images = sorted(p for s in splits for p in Path(root, "leftImg8bit", s).glob("*/*_leftImg8bit.png"))
         self.labels = [Path(root, "gtFine", *p.parts[-3:-1], p.name.replace("leftImg8bit", "gtFine_labelIds"))
                        for p in self.images]
+        assert self.images, (f"no {Path(root, 'leftImg8bit', '<split>', '<city>', '*_leftImg8bit.png')} for splits "
+                             f"{list(splits)}: the root must be the folder that holds leftImg8bit/ and gtFine/")
         self.large_uncertainty, self.uncertainty_split = large_uncertainty, uncertainty_split
         augment = [
             v2.ScaleJitter(tuple(base_size), tuple(scale_range)),

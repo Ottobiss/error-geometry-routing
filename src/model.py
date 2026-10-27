@@ -10,7 +10,6 @@ VARIANTS = {  # SegformerConfig fields that differ between the MiT encoders
     "b0": dict(depths=[2, 2, 2, 2], hidden_sizes=[32, 64, 160, 256], decoder_hidden_size=256),
     "b2": dict(depths=[3, 4, 6, 3], hidden_sizes=[64, 128, 320, 512], decoder_hidden_size=768),
 }
-CLASSIFIER_SCALE = 0.02  # trained logits (tens) would saturate the ball: a pretrained classifier is scaled down
 
 
 def patch_mean(x, patch):
@@ -35,27 +34,24 @@ class HyperSegFormer(nn.Module):
     to the origin gives the uncertainty (Eq. 15).
 
     manifold: poincare | lorentz (see src.hyperbolic). With large_head the last 1x1 conv of the decoder also outputs
-    a logit of the large model's hyperbolic uncertainty (the small model of the routing pipeline). A trained classifier
-    of a segmentation checkpoint is kept, scaled by CLASSIFIER_SCALE: the same predictions, embeddings inside the ball.
+    a logit of the large model's hyperbolic uncertainty (the small model of the routing pipeline). The class outputs
+    are multiplied by scale before the exp map: the trained classifier of a segmentation checkpoint keeps its weights
+    and predictions, its logits (tens) are brought to where the embeddings should start. A constant multiplier rather
+    than scaled-down weights keeps Adam's steps, about lr per weight, relative to the weights' own size.
     Only the last 1x1 conv of the decoder, which HyperUL acts on, is trained; the rest of SegFormer is fixed.
     Uncertainties are averaged over patch x patch squares of the input. pretrained=None builds the architecture only
     (for load_model).
     """
 
     def __init__(self, num_classes, c=0.7, pretrained=None, variant="b0", manifold="poincare", large_head=False,
-                 patch=1):
+                 patch=1, scale=0.02):
         super().__init__()
-        self.num_classes, self.large_head, self.patch = num_classes, large_head, patch
+        self.num_classes, self.large_head, self.patch, self.scale = num_classes, large_head, patch, scale
         self.manifold = MANIFOLDS[manifold](c)
         config = SegformerConfig(num_labels=num_classes, **VARIANTS[variant])
         if pretrained:
-            self.net, info = SegformerForSemanticSegmentation.from_pretrained(
-                pretrained, config=config, ignore_mismatched_sizes=True, output_loading_info=True)
-            initialized = info["missing_keys"] + [key for key, *_ in info["mismatched_keys"]]
-            if "decode_head.classifier.weight" not in initialized:  # loaded: a trained classifier of these classes
-                with torch.no_grad():
-                    for p in self.net.decode_head.classifier.parameters():
-                        p *= CLASSIFIER_SCALE
+            self.net = SegformerForSemanticSegmentation.from_pretrained(pretrained, config=config,
+                                                                        ignore_mismatched_sizes=True)
         else:
             self.net = SegformerForSemanticSegmentation(config)
         if large_head:
@@ -75,7 +71,7 @@ class HyperSegFormer(nn.Module):
         logits of the large model's uncertainty (B, H, W) or None; the last two are patch means."""
         out = self.net(pixel_values=x).logits
         with torch.autocast(x.device.type, enabled=False):
-            z = self.manifold.expmap0(out[:, :self.num_classes].float())
+            z = self.manifold.expmap0(self.scale * out[:, :self.num_classes].float())
             logits, dist = self.manifold.coordinates(z), self.manifold.dist0(z)
         size = x.shape[-2:]
         logits = F.interpolate(logits, size, mode="bilinear", align_corners=False)
@@ -91,7 +87,8 @@ def build_model(cfg, num_classes, pretrained=True):
     """HyperSegFormer from a training config; data.large_uncertainty adds the large-uncertainty head."""
     m = cfg.model
     return HyperSegFormer(num_classes, m.c, m.pretrained if pretrained else None, m.get("variant", "b0"),
-                          m.get("manifold", "poincare"), bool(cfg.data.get("large_uncertainty")), m.get("patch", 1))
+                          m.get("manifold", "poincare"), bool(cfg.data.get("large_uncertainty")), m.get("patch", 1),
+                          m.get("classifier_scale", 0.02))
 
 
 def load_model(path, num_classes):
