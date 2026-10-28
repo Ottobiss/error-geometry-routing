@@ -1,7 +1,6 @@
 # Integration guide: B0 patch error score (R, Z, ZR, F3F0NR)
 
-Written in ASD-STE100 (Simplified Technical English). Status: 2026-10-28, branch `SAE`, commit `023c7b1`
-plus the working tree.
+Written in ASD-STE100 (Simplified Technical English). Status: 2026-10-28, branch `SAE`, commit `1df870a`.
 
 ## 1. Scope
 
@@ -108,7 +107,7 @@ only the objects in the list. The full files import training code that the score
 | From | Objects |
 |---|---|
 | `core/components.py` | `NC` (= 19) |
-| `core/models.py` | `CHECKPOINTS`, `FULL_RES`, `SegModel`, `load_model` |
+| `core/models.py` | `CHECKPOINTS`, `FULL_RES`, `upsample_logits`, `SegModel`, `load_model` |
 | `core/evaluation.py` | `entropy_score` |
 | `sae/hooks.py` | `BLOCKS`, `STRIDES`, `PATCH`, `stage`, `stride`, `fc2`, `MixFFNTap`, `selection_index`, `pool_to_patches` |
 | `sae/patch_features.py` | `per_patch`, `boundary_map`, `output_features` |
@@ -149,16 +148,17 @@ PARTS = {"R": ("F0", "N", "R"), "Z": ("F0", "Z"), "ZR": ("F0", "N", "Z", "R"), "
 
 
 class ErrorScorer:
-    """features: "R", "Z", "ZR" or "F3F0NR"; root: folder with ckpt/ae_b8/<block>.pt and <features>.cbm."""
+    """features: "R", "Z", "ZR" or "F3F0NR"; root: the results/ae folder of the SAE project, with
+    ckpt/ae_b8/<block>.pt and runs/<features>_ae_b8_catboost/model.cbm."""
 
-    def __init__(self, features, root, device="cuda", b0=None):
+    def __init__(self, features, root="results/ae", device="cuda", b0=None):
         root = Path(root)
         self.parts = PARTS[features]
         self.b0 = b0 if b0 is not None else load_model("b0", device)
         self.enc = {b: load_encoder(root / "ckpt" / "ae_b8" / f"{b}.pt", device)[0] for b in BLOCKS}
         self.norms = {b: (e.mean, e.scale.item()) for b, e in self.enc.items()}
         self.model = CatBoost()
-        self.model.load_model(str(root / f"{features}.cbm"))
+        self.model.load_model(str(root / "runs" / f"{features}_ae_b8_catboost" / "model.cbm"))
 
     @torch.inference_mode()
     def __call__(self, small):
@@ -187,39 +187,57 @@ class ErrorScorer:
 
 ### 5.2 Fitted artifacts
 
-Copy these files into one artifact folder (32 MB in total):
+CAUTION: The weights are not in git (`results/` is in `.gitignore`). You must download them yourself. Get the
+archive `ae_error_artifacts.zip` from the file exchange (ask the owner of branch `SAE` for the link).
 
-| Copy from (branch `SAE`) | Copy to | Size |
+The archive keeps the paths of this project. It contains:
+
+| Path in the archive | Content | Size |
 |---|---|---|
-| `results/ae/ckpt/ae_b8/<block>.pt`, 8 files | `<root>/ckpt/ae_b8/<block>.pt` | 27 MB |
-| `results/ae/runs/R_ae_b8_catboost/model.cbm` | `<root>/R.cbm` | 0.6 MB |
-| `results/ae/runs/Z_ae_b8_catboost/model.cbm` | `<root>/Z.cbm` | 1.5 MB |
-| `results/ae/runs/ZR_ae_b8_catboost/model.cbm` | `<root>/ZR.cbm` | 1.4 MB |
-| `results/ae/runs/F3F0NR_ae_b8_catboost/model.cbm` | `<root>/F3F0NR.cbm` | 1.3 MB |
+| `results/ae/ckpt/ae_b8/s1b1.pt` … `s4b2.pt`, 8 files | Bottleneck AE of each block, with the normalisation constants | 27 MB |
+| `results/ae/runs/R_ae_b8_catboost/model.cbm` | CatBoost model, set R | 0.6 MB |
+| `results/ae/runs/Z_ae_b8_catboost/model.cbm` | CatBoost model, set Z | 1.5 MB |
+| `results/ae/runs/ZR_ae_b8_catboost/model.cbm` | CatBoost model, set ZR | 1.4 MB |
+| `results/ae/runs/F3F0NR_ae_b8_catboost/model.cbm` | CatBoost model, set F3F0NR | 1.3 MB |
+| `results/ae/runs/<set>_ae_b8_catboost/scores.parquet`, 4 files | Saved test scores, only for the acceptance test (section 9) | 4 × 20 MB |
 
-The encoder checkpoints contain the normalisation constants. You do not need `results/ae/acts/`.
+Where to unpack:
+- **Clone of this project:** unpack the archive into the repository root (the folder with `pyproject.toml`).
+  The files then are at the same paths as on the experiment machine, and the scorer default
+  `root="results/ae"` finds them when you start Python from the repository root.
+- **Router repository:** unpack the archive into the router repository root, or into a different folder. Give
+  the `results/ae` folder to the scorer: `ErrorScorer("ZR", root="<folder>/results/ae")`.
+
+Do not change the folder structure under `results/ae`. The scorer finds the files by these paths. It needs
+only `ckpt/ae_b8/` and the `model.cbm` of your set (32 MB in total). The `scores.parquet` files are only for
+the acceptance test.
 
 ### 5.3 Python packages
 
-`torch`, `transformers`, `catboost`, `numpy`, `pandas`, `pillow`. The tested versions are torch 2.14.1+cu130,
-transformers 5.20.2, catboost 1.2.10 and Python 3.14.
+`torch`, `transformers`, `catboost`, `numpy`, `pandas`, `pillow`, and `pyarrow` for the acceptance test
+(it reads `.parquet` files). The tested versions are torch 2.14.1+cu130, transformers 5.20.2, catboost 1.2.10,
+pandas 3.0.6, pyarrow 26.0.0 and Python 3.14. The torch wheel comes from the index
+`https://download.pytorch.org/whl/cu130` (see `pyproject.toml` on branch `SAE`).
+
+NOTE: At the first start, `load_model("b0")` downloads the B0 weights from Hugging Face. Make sure that the
+machine has network access or a Hugging Face cache that contains them.
 
 ## 6. Procedure
 
 1. Copy the code (section 5.1) into the router repository.
-2. Copy the artifacts (section 5.2) into a folder `<root>`.
+2. Download the archive and unpack it (section 5.2).
 3. Install the Python packages (section 5.3).
 4. Make one scorer for each process:
 
    ```python
    from ae_error.scorer import ErrorScorer
-   scorer = ErrorScorer("ZR", root="<root>")          # or "R", "Z", "F3F0NR"
+   scorer = ErrorScorer("ZR", root="results/ae")      # or "R", "Z", "F3F0NR"
    ```
 
 5. If the router already has a B0 `SegModel`, give it to the scorer. This prevents a second copy of B0:
 
    ```python
-   scorer = ErrorScorer("ZR", root="<root>", b0=router_b0)
+   scorer = ErrorScorer("ZR", root="results/ae", b0=router_b0)
    ```
 
 6. Replace the router's B0 call with the scorer call:
@@ -242,6 +260,11 @@ CAUTION: Use the working resolution of section 2. The models know only 1024 × 5
 their meaning.
 
 CAUTION: H and W must be multiples of 16. If not, `per_patch` stops with an assertion.
+
+CAUTION: Use transformers 5.x. `MixFFNTap` uses the module names of transformers 5.x
+(`segformer.stages[s].patch_embeddings`, `blocks[j].mlp.fc2`) and the output (embeddings, height, width) of
+the patch embeddings. Another version can stop with an error or give wrong hook positions. After an upgrade,
+do the acceptance test (section 9) again.
 
 CAUTION: Use B0 in fp32. We did not test fp16 or other B0 checkpoints. If you change B0, you must train the
 encoders and CatBoost again (section 11).
@@ -284,14 +307,14 @@ def region_stats(pixel_map, regions, n):
 `expected_errors` is the predicted number of wrong B0 pixels in the unit. Use it if the router sorts units
 under a pixel budget. Use `mean` if the router sorts units of equal size.
 
-To give the features to a learned router, aggregate the N, Z and R columns the same way. Reshape each column
+To give the features to a learned router, aggregate the N, Z, R (and raw) columns the same way. Reshape each column
 to (Hp, Wp). Then apply `to_pixels` and `region_stats`.
 
 ## 9. Acceptance test
 
 Do this test after the installation. It compares the scorer with the saved test scores of branch `SAE`.
 
-1. Copy `results/ae/runs/<set>_ae_b8_catboost/scores.parquet` for R, Z, ZR and F3F0NR to a test folder.
+1. Use the saved scores `results/ae/runs/<set>_ae_b8_catboost/scores.parquet` from the archive (section 5.2).
 2. Load a frame and make it the same way as the B0 pipeline:
 
    ```python
@@ -354,17 +377,30 @@ NOTE: F3F0NR is a descriptive set. We added it after the test results were known
 
 ## 11. Train again (only if B0, the resolution or the data change)
 
-Run these commands on branch `SAE`. Then copy the new artifacts (section 5.2).
+Run these commands on branch `SAE`. The training writes the files to the paths of section 5.2. Then make a new
+archive from these paths, relative to the repository root. Do not put `results/ae/ckpt/ae_b8/train.csv` or
+`results/ae/acts/` in the archive. The scorer does not use them.
+
+Before you start, put the data into `data/` (it is in `.gitignore`):
+- Cityscapes: `leftImg8bit/train`, `leftImg8bit/val` and `gtFine/val`.
+- ACDC: `rgb_anon` and `gt` of fog, night, rain and snow, `val`.
+
+`download.cityscapes` and `download.acdc` get these files. By default, `download.cityscapes` gets only
+`leftImg8bit/val/`. Use `--prefix leftImg8bit/train/` for the train frames. Use `--package` and `--prefix`
+(`--pattern` for ACDC) for the label archives.
 
 ```bash
 uv run python -m ae.collect
 uv run python -m ae.train
 uv run python -m sae.patch_features --dataset cityscapes --sae none
+uv run python -m sae.patch_features --dataset acdc --sae none
 uv run python -m ae.patch_features --dataset cityscapes --encoders ae_b8
+uv run python -m ae.patch_features --dataset acdc --encoders ae_b8
 uv run python -m ae.classify cv --features ZR --encoder ae_b8 --model catboost
 uv run python -m ae.classify test --features ZR --encoder ae_b8 --model catboost
 ```
 
 NOTE: `ae.classify` reads F0 and the labels from the v1 base tables. `sae.patch_features --sae none` writes
-only these tables (it does not need the SAE). Run it before `ae.patch_features`. Repeat the last two commands
-for R, Z and F3F0NR. F3F0NR also reads the raw activations from the v1 base tables.
+only these tables (it does not need the SAE). Run it before `ae.patch_features`. `ae.classify test` scores
+Cityscapes P1 and all ACDC conditions. Thus, it needs the ACDC tables too. Repeat the last two commands for R,
+Z and F3F0NR. F3F0NR also reads the raw activations from the v1 base tables.
