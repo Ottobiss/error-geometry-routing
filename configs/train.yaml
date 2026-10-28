@@ -14,9 +14,9 @@ data:
 model:
   variant: b0                # MiT encoder: b0 | b2
   pretrained: nvidia/segformer-b0-finetuned-cityscapes-1024-1024  # HF hub id or local path; only its last conv trains
-  manifold: poincare         # model of hyperbolic space: poincare | lorentz; its coordinates are the class logits
+  manifold: lorentz          # lorentz | poincare (the paper's; its logits <= 1/sqrt(c) break a frozen network)
   c: 0.7                     # the hyperbolic space has curvature -c
-  classifier_scale: 0.02     # class outputs x this before the exp map: where NVIDIA's logits (tens) put the embeddings
+  classifier_scale: 0.2      # class outputs x this before the exp map: where NVIDIA's logits (tens) put the embeddings
   patch: 32                  # uncertainties are averaged over patch x patch pixel squares, 1 = per pixel
 
 loss:
@@ -27,14 +27,14 @@ loss:
   large_unc_loss: bce        # bce | mse | l1; the prediction is always the sigmoid of the extra output
 
 train:
-  iters: 80000
-  lr: 1.5e-3                 # of the last decoder conv, the only trained layer
+  iters: 2000                # the frozen network changes within the first hundreds; best.pt is chosen by val mIoU
+  lr: 1.5e-4                 # of the last decoder conv, the only trained layer: ~0.1% of its weights (~0.15) per step
   weight_decay: 0.01
-  warmup: 1000
+  warmup: 100
   poly_power: 0.9
   amp: false                 # bf16 autocast
 
 log:
   every: 50
-  val_every: 4000
+  val_every: 250
   val_images: 3              # validation panels in TensorBoard
