@@ -181,8 +181,7 @@ Computed on P0 CV (selection), then once on P1 and ACDC (all and per condition),
 ## 10. Pre-registered comparisons
 
 Paired bootstrap over frames, 2,000 resamples, seed 0, 95% interval of the difference, CatBoost unless
-stated. Write these into EXPERIMENTS.md before the first P1 or ACDC score. EXPERIMENTS.md is on
-`origin/geometry` and not on this branch, so bring it over first.
+stated.
 
 Primary (the anomaly hypothesis; Holm correction over these three):
 1. ACDC all, recall@10%: R − F0N.
@@ -199,8 +198,8 @@ Everything else is descriptive: the linear model, the per-condition ACDC numbers
 R_only and the bottleneck ablation.
 
 Expectation, stated in advance: most B0 errors on Cityscapes are ambiguous boundary and small-object pixels
-that are in distribution, not anomalous. All density-type scores in EXPERIMENTS.md (DDU, kNN, Mahalanobis)
-stayed at or below entropy on Cityscapes. A null result on P1 is likely; ACDC is where R can help.
+that are in distribution, not anomalous. Earlier density-type scores (DDU, kNN, Mahalanobis) stayed at or
+below entropy on Cityscapes. A null result on P1 is likely; ACDC is where R can help.
 
 ## 11. Steps and outputs
 
@@ -212,9 +211,8 @@ stayed at or below entropy on Cityscapes. A null result on P1 is likely; ACDC is
 | 3. Unsupervised checks | `ae/checks.py` | `results/ae/checks/`: R by population, Spearman with entropy, P0 AUROC per block |
 | 4. Patch features | `ae/patch_features.py` (reuses `sae.hooks.pool_to_patches`, base tables from v1) | `results/ae/patches/<encoder>/<dataset>/<image_id>.npz` |
 | 5. P0 CV | `ae/classify.py cv --features R --encoder ae_b8 --model catboost \| logreg` | `results/ae/runs/<set>_<encoder>_<model>/cv_*` |
-| 6. Freeze | EXPERIMENTS.md entry: encoder, b, feature sets, decile list, comparisons | — |
-| 7. Tests | `ae/classify.py test`, then `compare` | `scores.parquet`, `metrics.json`, `results/ae/compare.csv` |
-| 8. Write-up | RESULTSV2.md | — |
+| 6. Tests | `ae/classify.py test`, then `compare` | `scores.parquet`, `metrics.json`, `results/ae/compare.csv` |
+| 7. Write-up | RESULTSV2.md | — |
 
 `ae/classify.py` should reuse `sae.classify` (`load_meta`, `training_rows`, `metrics`, `paired_bootstrap`)
 rather than copy it; only the feature loading and the model wrapper are new.

@@ -1,4 +1,4 @@
-"""Steps 5 and 7: classifiers on the patch features, GroupKFold on P0, frozen tests on P1 and ACDC
+"""Steps 5 and 6: classifiers on the patch features, GroupKFold on P0, frozen tests on P1 and ACDC
 (PLANv2.md §6, §7, §9, §10).
 
     uv run python -m ae.classify cv --features R --encoder ae_b8 --model catboost      # P0, out-of-fold scores
@@ -387,6 +387,12 @@ def cmd_test(args):
 
 def cmd_compare(args):
     enc = {"ae": args.encoder, "pca": args.pca, None: None}
+    needed = {(f, enc[e]) for *_, (r, re), (c, ce) in COMPARISONS for f, e in ((r, re), (c, ce))}
+    missing = sorted((f, e) for f, e in needed if not (run_dir(f, e, "catboost") / "scores.parquet").exists())
+    if missing:
+        raise SystemExit("compare needs the test scores of these CatBoost runs (cv first, then test):\n" + "\n".join(
+            f"  uv run python -m ae.classify test --features {f} --model catboost" + (f" --encoder {e}" if e else "")
+            for f, e in missing))
     rows, counts = [], {}
     for family, test, metric, (run, re), (control, ce) in COMPARISONS:
         da, db = run_dir(run, enc[re], "catboost"), run_dir(control, enc[ce], "catboost")
