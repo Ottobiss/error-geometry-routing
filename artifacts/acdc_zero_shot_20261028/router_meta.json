@@ -1,0 +1,10 @@
+{
+  "architecture": "SpatialRouter",
+  "channels": 24,
+  "global_dim": 20,
+  "tile": 256,
+  "margin": 128,
+  "trained_on": "Cityscapes P0",
+  "selection": "top-k predicted B5 gain",
+  "load_inference_only": true
+}

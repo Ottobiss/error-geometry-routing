@@ -1,0 +1,4 @@
+B5_patches_per_frame,method,mIoU,delta_to_entropy,ci_lo,ci_hi,used_router
+1,spatial B0 router,75.577828,0.350563,-1.827363,0.775643,true
+2,spatial B0 router,77.779431,0.000000,0.000000,0.000000,false
+3,spatial B0 router,80.301344,0.379997,0.014202,0.733425,true

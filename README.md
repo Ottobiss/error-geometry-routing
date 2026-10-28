@@ -78,14 +78,19 @@ python -m routing.summary                     # все методы на CS P1 �
 python -m features.tiles --dataset cityscapes --input image   # B2 по патчам 256 + контекст 64, замеры времени
 python -m routing.tiles --test cityscapes:p1 --tiles image_t256_m64   # каскад: mIoU против мс на кадр
 python -m routing.cascade                     # каскад вживую: реальное время, fp32 / fp16
-python -m features.tile_features --dataset cityscapes --tiles image_t256_m64   # признаки патчей
-python -m routing.tile_router                 # обученный роутер на патчах против энтропии
+python -m features.tile_features --dataset cityscapes --tiles image_t256_m64   # признаки патчей и цены B0/B2
+python -m routing.tile_router                 # Δ-регрессия и post-hoc B0→B2 роутер против энтропии
 
 python -m features.export                     # таблицы признаков компонент и патчей (~5 мин), results/tabular/
 ```
 
 Методы роутера — `routing/methods/`; список: `python -m routing.run --help`. Любой построитель
 признаков можно проверить смоук-тестом: `python -m features.build knn --limit 3`.
+
+`routing.tile_router` включает post-hoc rejector из Narasimhan et al. (NeurIPS 2022): B0 и B2
+заморожены, а роутер учится по стоимости ошибок B0 против ошибок B2. После добавления этого метода
+нужно заново запустить `features.tile_features`, поскольку старый parquet не содержит `b0_error` и
+`b2_error` — они используются только при обучении и не поступают на вход роутеру.
 
 ## Тесты
 

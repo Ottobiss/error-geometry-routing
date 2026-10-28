@@ -86,13 +86,20 @@ def main():
             k = cache["pos"][image_id]
             comp, gt, b0 = cache["comp"][k], cache["gt"][k], cache["b0"][k]
             overlap = comp_to_tiles(comp, len(idx), tidx, n_tiles)
-            _, _, delta = tile_effects(gt, b0, tiled[tile_pos[image_id]], tidx, n_tiles)
+            b2t = tiled[tile_pos[image_id]]
+            _, _, delta = tile_effects(gt, b0, b2t, tidx, n_tiles)
+            valid = gt != IGNORE
+            # These two costs make the post-hoc deferral loss possible.  They
+            # are labels only: a router never receives them at inference time.
+            b0_error = np.bincount(tidx.ravel(), weights=(valid & (b0 != gt)).ravel(), minlength=n_tiles)
+            b2_error = np.bincount(tidx.ravel(), weights=(valid & (b2t != gt)).ravel(), minlength=n_tiles)
             cols = pixel_stats(logits[image_id], b0.astype(np.int64), boxes, tidx, n_tiles)
             cols.update({f"m_{c}": tile_scores(s[idx], overlap) for c, s in scores.items()})
             rows.append(pd.DataFrame({
                 "image_id": image_id, "population": pop, "tile": np.arange(n_tiles), **cols,
                 "n_comp": (overlap > 0).sum(0), "delta": delta,
-                "n_valid": np.bincount(tidx.ravel(), weights=(gt != IGNORE).ravel(), minlength=n_tiles)}))
+                "n_valid": np.bincount(tidx.ravel(), weights=valid.ravel(), minlength=n_tiles),
+                "b0_error": b0_error, "b2_error": b2_error}))
         print(f"{args.dataset}:{pop}: {len(units.table.image_id.unique())} кадров")
     table = pd.concat(rows, ignore_index=True)
     out = res.dir / f"tile_features_{args.tiles}.parquet"

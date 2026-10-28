@@ -22,6 +22,7 @@ from core.evaluation import _miou, _miou_batch, routing_cache
 from core.paths import RESULTS, DatasetResults
 from core.tiles import tile_effects, tile_index
 from core.data import DATASETS
+from routing.posthoc import PostHocRejector
 from routing.tiles import select
 
 UNCERTAINTY = ["ent_mean", "ent_p90", "ent_frac", "margin_mean", "pmax_mean", "boundary", "n_comp"] \
@@ -35,8 +36,12 @@ KS = (1, 2, 3)
 AVGS = (0.5, 1, 2, 3)          # общий бюджет: в среднем патчей на кадр
 
 
-def fit_predict(train, test, cols):
+def fit_predict(train, test, cols, method="delta"):
     train = train[train.n_valid > 0]
+    if method == "posthoc":
+        return PostHocRejector().fit(train, cols).score(test, cols) + 1e-9 * test.m_entropy.values
+    if method != "delta":
+        raise ValueError(f"Unknown router method: {method}")
     model = HistGradientBoostingRegressor(learning_rate=0.05, max_iter=300, max_leaf_nodes=15,
                                           min_samples_leaf=50, random_state=0)
     model.fit(train[cols], train.delta / train.n_valid, sample_weight=train.n_valid)
@@ -44,13 +49,13 @@ def fit_predict(train, test, cols):
     return model.predict(test[cols]) + 1e-9 * test.m_entropy.values
 
 
-def loco(acdc, cols, extra=None):
+def loco(acdc, cols, extra=None, method="delta"):
     """Предсказания для ACDC вне выборки: каждое условие — моделью, обученной на трёх других (+ extra)."""
     out = np.zeros(len(acdc))
     for cond in acdc.population.unique():
         test = acdc.population.values == cond
         train = acdc[~test] if extra is None else pd.concat([acdc[~test], extra])
-        out[test] = fit_predict(train, acdc[test], cols)
+        out[test] = fit_predict(train, acdc[test], cols, method=method)
     return out
 
 
@@ -135,15 +140,17 @@ def main():
     rows = []
     scores = base_scores(cs_p1)
     for g, cols in GROUPS.items():
-        scores[f"CS P0 · {g}"] = fit_predict(cs_p0, cs_p1, cols)
+        scores[f"CS P0 · Δ-регрессия · {g}"] = fit_predict(cs_p0, cs_p1, cols)
+        scores[f"CS P0 · post-hoc defer · {g}"] = fit_predict(cs_p0, cs_p1, cols, method="posthoc")
     eff = effects("cityscapes:p1", TESTS["cityscapes:p1"], cs_p1.image_id.unique())
     rows += evaluate("cityscapes:p1", cs_p1, scores, eff) + evaluate_global("cityscapes:p1", cs_p1, scores, eff)
 
     scores = base_scores(acdc)
     for g, cols in GROUPS.items():
-        scores[f"CS P0 · {g}"] = fit_predict(cs_p0, acdc, cols)
-        scores[f"ACDC LOCO · {g}"] = loco(acdc, cols)
-        scores[f"CS P0 + ACDC LOCO · {g}"] = loco(acdc, cols, extra=cs_p0)
+        for method, title in (("delta", "Δ-регрессия"), ("posthoc", "post-hoc defer")):
+            scores[f"CS P0 · {title} · {g}"] = fit_predict(cs_p0, acdc, cols, method=method)
+            scores[f"ACDC LOCO · {title} · {g}"] = loco(acdc, cols, method=method)
+            scores[f"CS P0 + ACDC LOCO · {title} · {g}"] = loco(acdc, cols, extra=cs_p0, method=method)
     eff = effects("acdc:all", TESTS["acdc:all"], acdc.image_id.unique())
     rows += evaluate("acdc:all", acdc, scores, eff) + evaluate_global("acdc:all", acdc, scores, eff)
 
