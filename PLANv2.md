@@ -122,6 +122,7 @@ patch; stages 3–4 gather one position.
 | R_pca, Z_pca, ZR_pca | the same with PCA | linear alternative |
 | R_only | N + R (AE), no F0 | descriptive: residual alone |
 | F3F0 | v1 raw activations + F0 | reference: what the raw activations hold |
+| F3F0NR | v1 raw activations + F0 + N + R (AE) | descriptive: everything in one set (added 2026-10-28, after the tests) |
 
 ## 7. Classifiers
 
@@ -195,7 +196,9 @@ Secondary (no correction; an interval at the edge counts as borderline):
 7. P1, recall@10%: Z − F3F0 (do the codes keep the raw activations' signal).
 
 Everything else is descriptive: the linear model, the per-condition ACDC numbers, 5 / 20 / 30% budgets,
-R_only and the bottleneck ablation.
+R_only, F3F0NR and the bottleneck ablation. F3F0NR was added after the test results were known, so it is not
+pre-registered. Its paired bootstraps against F3F0, R and ZR (P1 and ACDC all, recall@10% and robust AUROC)
+are descriptive only.
 
 Expectation, stated in advance: most B0 errors on Cityscapes are ambiguous boundary and small-object pixels
 that are in distribution, not anomalous. Earlier density-type scores (DDU, kNN, Mahalanobis) stayed at or

@@ -8,7 +8,7 @@
 
 Feature sets (parts: f0 = v1 output features incl. the categorical majority class, n = N, r = R, z = Z of the
 encoder, raw = v1 raw activations):
-  F0 f0 · F0N f0+n · R f0+n+r · Z f0+z · ZR f0+n+z+r · R_only n+r · F3F0 raw+f0
+  F0 f0 · F0N f0+n · R f0+n+r · Z f0+z · ZR f0+n+z+r · R_only n+r · F3F0 raw+f0 · F3F0NR raw+f0+n+r
 R_pca, Z_pca, ZR_pca are R, Z, ZR with --encoder pca_b8. N does not depend on the encoder.
 
 Both classifiers use the v1 P0 training rows (all patches with errors, 25% of clean ones with weight ×4,
@@ -50,7 +50,8 @@ from sae.hooks import PATCH
 from sae.patch_features import F0_NUM
 
 FEATURE_SETS = {"F0": ("f0",), "F0N": ("f0", "n"), "R": ("f0", "n", "r"), "Z": ("f0", "z"),
-                "ZR": ("f0", "n", "z", "r"), "R_only": ("n", "r"), "F3F0": ("raw", "f0")}
+                "ZR": ("f0", "n", "z", "r"), "R_only": ("n", "r"), "F3F0": ("raw", "f0"),
+                "F3F0NR": ("raw", "f0", "n", "r")}
 MODELS = ("catboost", "logreg")
 PARAMS = {**V1_PARAMS, "iterations": 10000}
 C_GRID = (1e-3, 1e-2, 1e-1, 1.0, 10.0)

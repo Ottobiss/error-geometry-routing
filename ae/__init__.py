@@ -15,8 +15,8 @@
 Bottleneck ablation (b = d/16, d/4; sensitivity only, §8.4): `ae.train --div 16`, `ae.train --div 4`, then
 quality, patch_features and checks with --encoders ae_b16 ae_b4.
 
-Steps 5 and 6 run once per feature set and classifier (catboost, logreg): F0, F0N, R, Z, ZR, R_only, F3F0 with
-the AE, and R, Z, ZR with --encoder pca_b8. Everything is written under results/ae/; the base patch tables
+Steps 5 and 6 run once per feature set and classifier (catboost, logreg): F0, F0N, R, Z, ZR, R_only, F3F0, F3F0NR
+with the AE, and R, Z, ZR with --encoder pca_b8. Everything is written under results/ae/; the base patch tables
 (F0, labels, pixel samples, raw activations) are reused from results/sae/patches/base/.
 """
 from core.paths import RESULTS

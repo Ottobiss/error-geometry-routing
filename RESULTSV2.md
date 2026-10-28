@@ -2,7 +2,8 @@
 
 Status as of 2026-10-27. This covers PLANv2.md steps 0–6 for the CatBoost runs: encoders, quality, label-free
 checks, P0 CV, P1/ACDC tests and the pre-registered comparisons. **Not run yet:** the logistic-regression runs,
-R_only, Z/ZR with PCA, and the bottleneck ablation (all descriptive in §10 of the plan). Code is at commit `023c7b1`
+R_only, Z/ZR with PCA, and the bottleneck ablation (all descriptive in §10 of the plan). The combined set F3F0NR
+(raw activations + F0 + N + R) was added on 2026-10-28 as a descriptive run (§6a). Code is at commit `023c7b1`
 plus uncommitted `ae/` changes. Hardware and versions as in RESULTSV1.
 
 ## 1. Encoders (`ae.collect`, `ae.train`, `ae.pca`)
@@ -84,14 +85,15 @@ used for the model refit on all of P0.
 | Z (AE) | 1512, 1872, 280, 1547, 1164 | 1275 | 14 min | 0.5693 | 0.9199 | 0.3161 | 0.7470 | 0.7959 |
 | ZR (AE) | 1465, 2403, 370, 1015, 873 | 1225 | 14 min | 0.5709 | 0.9221 | 0.3187 | 0.7646 | **0.8089** |
 | F3F0 | 1339, 1482, 294, 445, 934 | 899 | 54 min | 0.5691 | 0.9189 | 0.3167 | 0.7378 | 0.8025 |
+| F3F0NR (AE) | 854, 1605, 494, 807, 1016 | 955 | 52 min | 0.5712 | 0.9200 | 0.3206 | 0.7522 | 0.8055 |
 
 The R (AE) CV time is missing because that run was started by hand and its log is not under results/ae/logs.
 
 ### Learning
 
 - **Stopping is noisy across folds:** fold 2 always stops early (74–1115) and fold 1 always late.
-- **Feature-set size:** the scalar sets (F0, F0N, R) stop at 300–800 iterations. The code sets (Z, ZR, F3F0) need
-  1,000–2,400.
+- **Feature-set size:** the scalar sets (F0, F0N, R) stop at 300–800 iterations. The code sets (Z, ZR, F3F0,
+  F3F0NR) need 500–2,400.
 - **Cost:** F3F0 (raw activations) costs four times as much as Z for the same result.
 
 ### Reading
@@ -119,7 +121,8 @@ night 40.6%, rain 8.9%, snow 11.7%, all 17.4%).
 | R (PCA) | 0.5635 | 0.4259 | 0.1670 | 0.4149 | 0.3502 | 0.3008 |
 | Z (AE) | 0.5631 | 0.4239 | 0.1677 | 0.4425 | 0.3597 | 0.3040 |
 | ZR (AE) | **0.5663** | **0.4283** | **0.1768** | 0.4351 | 0.3558 | **0.3191** |
-| F3F0 | 0.5611 | 0.4193 | 0.1651 | 0.4385 | **0.3634** | 0.2948 |
+| F3F0 | 0.5611 | 0.4193 | 0.1651 | 0.4385 | 0.3634 | 0.2948 |
+| F3F0NR (AE) | 0.5622 | 0.4259 | 0.1663 | **0.4455** | **0.3653** | 0.2992 |
 
 ### Robust within-entropy AUROC (y50, P0 deciles 4–9)
 
@@ -133,6 +136,7 @@ night 40.6%, rain 8.9%, snow 11.7%, all 17.4%).
 | Z (AE) | 0.7310 | **0.6879** | 0.4690 | 0.7861 | 0.7113 | 0.6416 |
 | ZR (AE) | **0.7437** | 0.6827 | 0.5290 | 0.7965 | **0.7205** | 0.6873 |
 | F3F0 | 0.7220 | 0.6597 | 0.4434 | 0.7240 | 0.6468 | 0.5682 |
+| F3F0NR (AE) | 0.7329 | 0.6742 | 0.4578 | 0.7594 | 0.6898 | 0.5899 |
 
 ### Global AUROC / AP (y50)
 
@@ -142,6 +146,8 @@ night 40.6%, rain 8.9%, snow 11.7%, all 17.4%).
 | F0N | 0.9090 | 0.3227 | 0.8083 | 0.4879 | 0.7471 |
 | R (AE) | 0.9169 | 0.3336 | **0.8443** | 0.5111 | 0.7601 |
 | ZR (AE) | **0.9173** | **0.3433** | 0.8332 | **0.5152** | 0.7585 |
+| F3F0 | 0.9145 | 0.3266 | 0.8055 | 0.4645 | 0.7381 |
+| F3F0NR (AE) | 0.9154 | 0.3322 | 0.8101 | 0.4713 | 0.7423 |
 
 ### Pixel AUROC (descriptive; patch score broadcast to pixels vs the per-pixel score)
 
@@ -150,6 +156,7 @@ night 40.6%, rain 8.9%, snow 11.7%, all 17.4%).
 | entropy (pixel) | 0.9336 | 0.8756 | 0.7779 | 0.8924 | 0.8242 | 0.8341 |
 | R (AE) | 0.9118 | 0.8657 | 0.7646 | 0.8912 | 0.8308 | 0.8472 |
 | ZR (AE) | 0.9130 | 0.8671 | 0.7634 | 0.8955 | 0.8383 | 0.8388 |
+| F3F0NR (AE) | 0.9133 | 0.8685 | 0.7486 | 0.8916 | 0.8363 | 0.8199 |
 
 Pixel entropy stays ahead on Cityscapes and fog/night. That is expected: the patch score cannot rank pixels inside a patch.
 
@@ -166,6 +173,50 @@ Paired frame bootstrap, 2,000 resamples, seed 0. Holm correction over the three 
 | secondary | P1 | recall@10% | ZR − F0 | +0.0036 | [−0.0018, 0.0106] | 0.230 | — | includes 0 |
 | secondary | ACDC all | recall@10% | R(AE) − R(PCA) | +0.0125 | [0.0091, 0.0156] | <0.001 | — | excludes 0 (not borderline) |
 | secondary | P1 | recall@10% | Z − F3F0 | +0.0020 | [−0.0028, 0.0076] | 0.440 | — | includes 0 |
+
+## 6a. Combined set F3F0NR (descriptive, added 2026-10-28)
+
+F3F0NR puts everything into one CatBoost model: raw activations (4,096), F0 (11), N (12) and R (AE, 12), 4,131
+columns. Same rows, folds and parameters as the other runs. It was added after the test results were known, so
+it is not pre-registered and has no multiple-testing correction.
+
+Paired frame bootstrap, F3F0NR − control, 2,000 resamples, seed 0 (the same resamples as §6). Saved in
+`results/ae/runs/F3F0NR_ae_b8_catboost/descriptive_bootstrap.csv`.
+
+| Test | Metric | Control | Diff | 95% CI | p |
+|---|---|---|---|---|---|
+| P1 | recall@10% | F3F0 | +0.0010 | [−0.0014, 0.0037] | 0.369 |
+| P1 | robust AUROC y50 | F3F0 | +0.0109 | [0.0011, 0.0215] | 0.033 |
+| P1 | recall@10% | R (AE) | −0.0018 | [−0.0076, 0.0045] | 0.657 |
+| P1 | robust AUROC y50 | R (AE) | −0.0101 | [−0.0447, 0.0176] | 0.489 |
+| P1 | recall@10% | ZR (AE) | −0.0042 | [−0.0113, 0.0016] | 0.212 |
+| P1 | robust AUROC y50 | ZR (AE) | −0.0108 | [−0.0350, 0.0122] | 0.361 |
+| ACDC all | recall@10% | F3F0 | +0.0044 | [0.0028, 0.0061] | <0.001 |
+| ACDC all | robust AUROC y50 | F3F0 | +0.0217 | [0.0160, 0.0271] | <0.001 |
+| ACDC all | recall@10% | R (AE) | −0.0141 | [−0.0191, −0.0086] | <0.001 |
+| ACDC all | robust AUROC y50 | R (AE) | −0.1466 | [−0.1625, −0.1301] | <0.001 |
+| ACDC all | recall@10% | ZR (AE) | −0.0200 | [−0.0242, −0.0157] | <0.001 |
+| ACDC all | robust AUROC y50 | ZR (AE) | −0.0974 | [−0.1082, −0.0857] | <0.001 |
+
+Share of CatBoost feature importance (PredictionValuesChange of the final model) by group:
+
+| Model | F0 | raw | N | R |
+|---|---|---|---|---|
+| R (AE) | 0.640 | — | 0.145 | 0.215 |
+| F3F0NR (AE) | 0.537 | 0.418 | 0.020 | 0.026 |
+
+Reading:
+- **On Cityscapes, everything together equals the best sets.** P0 CV recall@10% is 0.571 (R 0.571, F3F0 0.569).
+  Robust AUROC is 0.752, between F3F0 (0.738) and R (0.766). On P1 no recall@10% difference to F3F0, R or ZR is
+  clear.
+- **On ACDC, adding the raw activations hurts.** F3F0NR is only a little above F3F0 and clearly below R and ZR:
+  robust AUROC 0.59 against 0.74 (R), recall@10% 0.299 against 0.313 (R) and 0.319 (ZR).
+- **Why:** with the raw columns present, CatBoost takes most of its splits from them. N and R fall from 36% of
+  the importance in R to 5%. The raw-activation splits fit Cityscapes but do not transfer under shift, as F3F0
+  already showed. The compact R and N columns carry the shift signal only when they are not crowded out.
+- **Rain and snow** are the only places where F3F0NR is first: recall@10% 0.446 (rain) and 0.365 (snow). This
+  matches §7 point 7: these conditions favour sets with codes or raw activations.
+- Cost: CV 52 min, the same as F3F0, against 4 min for R (PCA).
 
 ## 7. Reading
 
@@ -190,8 +241,10 @@ Paired frame bootstrap, 2,000 resamples, seed 0. Holm correction over the three 
 6. **ZR is the best overall set.** It has the best recall@10% on P1, fog, night and ACDC all, and the best ACDC
    AP. Its within-entropy gain on ACDC is smaller than R's (0.69 vs 0.74), so the codes help the global ranking
    more than the within-entropy one.
-7. **Rain and snow are the exception.** The sets with codes or raw activations (Z, ZR, F3F0) give the best
-   recall there, and R alone is below entropy.
+7. **Rain and snow are the exception.** The sets with codes or raw activations (Z, ZR, F3F0, F3F0NR) give the
+   best recall there, and R alone is below entropy.
+8. **More features do not help under shift.** Raw activations + F0 + N + R in one set (F3F0NR, §6a) is no better
+   than R or ZR on P1 and clearly worse on ACDC. The raw columns crowd out N and R.
 
 ## 8. Open items
 

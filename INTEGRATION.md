@@ -321,6 +321,10 @@ Recommendation:
 - **R**: the best ranking inside the same entropy level under domain shift. It is also the fastest.
 - **Z**: no advantage over ZR at the same cost.
 
+NOTE: Do not add the raw activations to a set. The set F3F0NR (raw activations + F0 + N + R) gives P1 recall@10%
+0.562 and ACDC recall@10% 0.299, robust AUROC 0.733 (P1) and 0.590 (ACDC). That is worse than R and ZR on ACDC
+(RESULTSV2.md §6a). This guide does not supply it.
+
 ## 11. Train again (only if B0, the resolution or the data change)
 
 Run these commands on branch `SAE`. Then copy the new artifacts (section 5.2).
