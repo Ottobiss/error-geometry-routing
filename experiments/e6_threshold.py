@@ -23,17 +23,17 @@ def image_confusions(domain):
     return np.stack(c0), np.stack(c5)
 
 
-def main():
+def image_scores(domain):
+    """Per-image entropy, knn and cs_fit-ECDF rank (see module docstring)."""
     feats = np.load(CACHE / "e3_tiles.npz")
     tiles = lambda d, k: feats[f"{d}__{k}__mean"]
-    ecdf = {k: np.sort(tiles("cs_fit", k).ravel()) for k in ("entropy", "knn")}
-    to_fit_rank = lambda d, k: np.searchsorted(ecdf[k], tiles(d, k)) / ecdf[k].size
+    fit_rank = lambda k: np.searchsorted(np.sort(tiles("cs_fit", k).ravel()), tiles(domain, k)) / tiles("cs_fit", k).size
+    return {"entropy": tiles(domain, "entropy").mean((1, 2)), "knn": tiles(domain, "knn").mean((1, 2)),
+            "rank": (fit_rank("entropy") + fit_rank("knn")).mean((1, 2))}
 
-    def scores(d):
-        return {"entropy": tiles(d, "entropy").mean((1, 2)), "knn": tiles(d, "knn").mean((1, 2)),
-                "rank": (to_fit_rank(d, "entropy") + to_fit_rank(d, "knn")).mean((1, 2))}
 
-    fit = scores("cs_fit")
+def main():
+    fit = image_scores("cs_fit")
     thresholds = {(k, t): np.quantile(s, 1 - t) for k, s in fit.items() for t in TARGETS}
 
     report = {}
@@ -43,7 +43,7 @@ def main():
         m0, m5 = miou(c0.sum(0)), miou(c5.sum(0))
         closed = lambda sel: 100 * (miou(np.where(sel[:, None, None], c5, c0).sum(0)) - m0) / (m5 - m0)
         report[domain] = {}
-        for k, s in scores(domain).items():
+        for k, s in image_scores(domain).items():
             for t in TARGETS:
                 sel = s > thresholds[(k, t)]
                 row = [round(100 * sel.mean(), 1), round(closed(sel), 1)]

@@ -24,6 +24,8 @@ MODELS = {
 
 # frankfurt is used to fit scores/routers, the rest is test only
 DOMAINS = ["cs_fit", "cs_test", "fog", "night", "rain", "snow"]
+# synthetic shift on cs_test (Cityscapes-C style), severity 1-2, see corrupt()
+CORRUPTIONS = [f"c_{k}{s}" for k in ("fog", "dark", "blur", "noise") for s in (1, 2)]
 
 _LUT = np.full(256, IGNORE, np.uint8)
 for l in labels:
@@ -33,6 +35,8 @@ for l in labels:
 
 def list_domain(domain):
     """Returns sorted (image, gt) path pairs for a domain."""
+    if domain in CORRUPTIONS:
+        return list_domain("cs_test")
     if domain.startswith("cs_"):
         cities = ["frankfurt"] if domain == "cs_fit" else ["lindau", "munster"]
         imgs = [p for c in cities for p in (DATA / "cityscapes/leftImg8bit/val" / c).glob("*.png")]
@@ -45,14 +49,28 @@ def list_domain(domain):
     return [(p, gt(p)) for p in sorted(imgs)]
 
 
+def corrupt(x, domain, seed):
+    """Synthetic shift on a [0, 1] image: fog, dark (low light + sensor noise), blur, noise."""
+    kind, s = domain[2:-1], int(domain[-1]) - 1
+    g = torch.Generator().manual_seed(seed)
+    if kind == "fog":  # denser towards the top of the frame
+        a = (0.4, 0.6)[s] * torch.linspace(1, 0.5, x.shape[1])[None, :, None]
+        return x * (1 - a) + 0.75 * a
+    if kind == "dark":
+        x = x ** 2 * (0.35, 0.2)[s]
+        return (x + (0.02, 0.04)[s] * torch.randn(x.shape, generator=g)).clamp(0, 1)
+    if kind == "blur":
+        sigma = (2.0, 4.0)[s]
+        return T.functional.gaussian_blur(x, 2 * round(2 * sigma) + 1, sigma)
+    return (x + (0.08, 0.16)[s] * torch.randn(x.shape, generator=g)).clamp(0, 1)
+
+
 class SegSet(Dataset):
     def __init__(self, domain):
         self.domain = domain
         self.items = list_domain(domain)
-        self.img_tf = T.Compose([
-            T.ToImage(), T.Resize(SIZE), T.ToDtype(torch.float32, scale=True),
-            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
+        self.load_tf = T.Compose([T.ToImage(), T.Resize(SIZE), T.ToDtype(torch.float32, scale=True)])
+        self.norm = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     def __len__(self):
         return len(self.items)
@@ -60,10 +78,13 @@ class SegSet(Dataset):
     def __getitem__(self, i):
         img_path, gt_path = self.items[i]
         gt = np.array(Image.open(gt_path))
-        if self.domain.startswith("cs_"):
+        if gt_path.name.endswith("_gtFine_labelIds.png"):
             gt = _LUT[gt]
         gt = Image.fromarray(gt).resize(SIZE[::-1], Image.NEAREST)
-        return self.img_tf(Image.open(img_path).convert("RGB")), torch.from_numpy(np.array(gt)), img_path.stem
+        img = self.load_tf(Image.open(img_path).convert("RGB"))
+        if self.domain in CORRUPTIONS:
+            img = corrupt(img, self.domain, i)
+        return self.norm(img), torch.from_numpy(np.array(gt)), img_path.stem
 
 
 def load_model(name, device="cuda"):

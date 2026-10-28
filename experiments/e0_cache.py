@@ -16,33 +16,40 @@ from tqdm import tqdm
 from common import CACHE, DOMAINS, RESULTS, SIZE, NUM_CLASSES, SegSet, confusion, load_model, miou
 
 
-@torch.inference_mode()
-def main():
+def load_models():
     b0, b5 = load_model("b0"), load_model("b5")
     feats = {}
     b0.decode_head.classifier.register_forward_pre_hook(lambda m, x: feats.update(f=x[0]))
+    return b0, b5, feats
 
-    report = {}
-    for domain in DOMAINS:
-        out = CACHE / domain
-        out.mkdir(parents=True, exist_ok=True)
-        conf = {k: np.zeros((NUM_CLASSES, NUM_CLASSES), np.int64) for k in ("b0", "b5")}
 
-        for img, gt, names in tqdm(DataLoader(SegSet(domain), batch_size=2, num_workers=2), desc=domain):
-            img = img.cuda().half()
-            logits0 = b0(pixel_values=img).logits
-            feat0 = F.avg_pool2d(feats["f"], 2)
-            up = lambda x: F.interpolate(x.float(), SIZE, mode="bilinear").argmax(1).byte().cpu().numpy()
-            pred0, pred5 = up(logits0), up(b5(pixel_values=img).logits)
+@torch.inference_mode()
+def cache_domain(domain, b0, b5, feats):
+    """Caches one domain, returns its B0 and B5 mIoU."""
+    out = CACHE / domain
+    out.mkdir(parents=True, exist_ok=True)
+    conf = {k: np.zeros((NUM_CLASSES, NUM_CLASSES), np.int64) for k in ("b0", "b5")}
 
-            for i, name in enumerate(names):
-                g = gt[i].numpy()
-                conf["b0"] += confusion(pred0[i], g)
-                conf["b5"] += confusion(pred5[i], g)
-                np.savez_compressed(out / f"{name}.npz", gt=g, pred_b0=pred0[i], pred_b5=pred5[i],
-                                    logits_b0=logits0[i].cpu().numpy(), feat_b0=feat0[i].cpu().numpy())
+    for img, gt, names in tqdm(DataLoader(SegSet(domain), batch_size=2, num_workers=2), desc=domain):
+        img = img.cuda().half()
+        logits0 = b0(pixel_values=img).logits
+        feat0 = F.avg_pool2d(feats["f"], 2)
+        up = lambda x: F.interpolate(x.float(), SIZE, mode="bilinear").argmax(1).byte().cpu().numpy()
+        pred0, pred5 = up(logits0), up(b5(pixel_values=img).logits)
 
-        report[domain] = {k: round(miou(c), 2) for k, c in conf.items()}
+        for i, name in enumerate(names):
+            g = gt[i].numpy()
+            conf["b0"] += confusion(pred0[i], g)
+            conf["b5"] += confusion(pred5[i], g)
+            np.savez_compressed(out / f"{name}.npz", gt=g, pred_b0=pred0[i], pred_b5=pred5[i],
+                                logits_b0=logits0[i].cpu().numpy(), feat_b0=feat0[i].cpu().numpy())
+
+    return {k: round(miou(c), 2) for k, c in conf.items()}
+
+
+def main():
+    models = load_models()
+    report = {domain: cache_domain(domain, *models) for domain in DOMAINS}
 
     print(f"{'domain':8} {'b0':>6} {'b5':>6} {'gap':>6}")
     for d, r in report.items():
