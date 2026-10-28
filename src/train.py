@@ -11,6 +11,7 @@ import itertools
 import json
 import os
 import time
+import warnings
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
@@ -129,10 +130,15 @@ def setup_distributed():
     if world == 1:
         return 0, 0, 1
     local_rank = int(os.environ["LOCAL_RANK"])
-    if torch.cuda.is_available():
+    cuda = torch.cuda.is_available()
+    if cuda:
         torch.cuda.set_device(local_rank)
     # long timeout: the other processes wait while rank 0 validates
-    distributed.init_process_group("nccl" if torch.cuda.is_available() else "gloo", timeout=timedelta(hours=1))
+    distributed.init_process_group("nccl" if cuda else "gloo", timeout=timedelta(hours=1),
+                                   device_id=torch.device("cuda", local_rank) if cuda else None)
+    # DDP compares the strides of size-1 dims too: under bf16 the gradient of the 1x1 conv comes channels_last, which is
+    # the same memory for a 1x1 kernel
+    warnings.filterwarnings("ignore", message="Grad strides do not match bucket view strides")
     return int(os.environ["RANK"]), local_rank, world
 
 
