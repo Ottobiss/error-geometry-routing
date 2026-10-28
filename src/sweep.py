@@ -6,8 +6,9 @@
 
 Trial 0 keeps the defaults of train.yaml, the others sample configs/sweep.yaml:space. The per-GPU batch is the
 largest that fits: training steps and a full-resolution validation forward are probed in separate processes.
-Each trial trains in <out>/<stage>/<trial> (src.train, under torchrun on several GPUs) and is appended to
-<out>/<stage>/trials.jsonl. A rerun skips recorded trials and resumes an interrupted one from its last.pt.
+Each trial trains in <out>/<stage>/<trial> (src.train, under torchrun on several GPUs), is scored at the validation
+of its best.pt (the best val mIoU) and appended to <out>/<stage>/trials.jsonl. A rerun skips recorded trials and
+resumes an interrupted one from its last.pt.
 """
 import argparse
 import json
@@ -119,20 +120,21 @@ def run(command, log):
 
 
 def run_trial(cfg, gpus, train_args, out):
-    """Trains (resuming from last.pt if present) and, for the small stage, runs the benchmark on val -> metrics or
-    None."""
+    """Trains (resuming from last.pt if present) and, for the small stage, runs the benchmark on val with best.pt ->
+    the metrics of best.pt's validation, or None."""
     launcher = [sys.executable] if gpus == 1 else [
         sys.executable, "-m", "torch.distributed.run", "--standalone", f"--nproc_per_node={gpus}"]
     resume = ["--resume", str(out / "last.pt")] if (out / "last.pt").exists() else []
     with open(out / "log.txt", "a") as log:
         if not run([*launcher, "-m", "src.train", *train_args, *resume], log):
             return None
-        metrics = json.loads((out / "metrics.jsonl").read_text().splitlines()[-1])  # the last validation
+        validations = [json.loads(line) for line in (out / "metrics.jsonl").read_text().splitlines()]
+        metrics = max(validations, key=lambda m: m["val/mIoU"])  # the first best, as best.pt
         metrics["gap"] = metrics["val/hyperbolic_uncertainty_wrong"] - metrics["val/hyperbolic_uncertainty_correct"]
         if cfg.stage == "small":
             amp = OmegaConf.load(out / "config.yaml").train.amp  # evaluate in the precision of training
             if not run([sys.executable, "-m", "src.benchmark", "configs/benchmark.yaml", f"root={cfg.root}",
-                        "split=val", f"small={out / 'last.pt'}", f"large={cfg.large_checkpoint}",
+                        "split=val", f"small={out / 'best.pt'}", f"large={cfg.large_checkpoint}",
                         f"out={out / 'benchmark'}", f"thresholds={list(cfg.thresholds)}", f"workers={cfg.workers}",
                         f"amp={amp}"], log):
                 return None
