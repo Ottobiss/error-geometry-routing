@@ -1,4 +1,4 @@
-# Integration guide: B0 patch error score (R, Z, ZR)
+# Integration guide: B0 patch error score (R, Z, ZR, F3F0NR)
 
 Written in ASD-STE100 (Simplified Technical English). Status: 2026-10-28, branch `SAE`, commit `023c7b1`
 plus the working tree.
@@ -9,13 +9,14 @@ This guide tells you how to install the patch error scorer in a router. The guid
 Thus, the scorer has one input (a frame) and one main output (a score map). You connect the score map to
 your router units with an adapter (section 8).
 
-The scorer finds 16 × 16 pixel patches where SegFormer-B0 makes errors. It uses three feature sets:
+The scorer finds 16 × 16 pixel patches where SegFormer-B0 makes errors. It uses four feature sets:
 
 | Set | Features | Columns |
 |---|---|---|
 | R | B0 output statistics (F0), activation norm (N), AE reconstruction residual (R) | 11 + 12 + 12 = 35 |
 | Z | F0, AE bottleneck codes (Z) | 11 + 512 = 523 |
 | ZR | F0, N, Z, R | 11 + 12 + 512 + 12 = 547 |
+| F3F0NR | Raw activations (raw), F0, N, R | 4,096 + 11 + 12 + 12 = 4,131 |
 
 A CatBoost model gives the score from these features. The score is the predicted fraction of wrong B0
 pixels in the patch.
@@ -53,9 +54,12 @@ The scorer does these steps for each frame:
    - Z: the code z (b values).
    - R: the residual ‖x − x̂‖² / d.
    - N: the norm ‖x‖² / d.
+   - raw (F3F0NR only): the activation h itself, not normalised (d values).
 5. It moves the values to the 16 × 16 patch grid:
-   - Stages 1–2: N and R use the mean and the max over the positions in the patch. Z uses the mean.
+   - Stages 1–2: N and R use the mean and the max over the positions in the patch. Z uses the mean. raw uses
+     the max.
    - Stages 3–4: the scorer uses the one position nearest to the patch centre.
+   - raw is then rounded to fp16, as in training.
 6. It calculates F0 from the B0 softmax for each patch:
    - entropy: mean, max, p90;
    - max softmax: mean, min;
@@ -63,7 +67,7 @@ The scorer does these steps for each frame:
    - boundary fraction;
    - row and column of the patch;
    - majority class `cls` (a categorical column).
-7. It puts the columns in the model order: F0, then N, then Z, then R.
+7. It puts the columns in the model order: F0, then N, then Z, then R. For F3F0NR the order is raw, F0, N, R.
 8. It applies the CatBoost model and returns the probability.
 
 ## 4. Output
@@ -78,17 +82,19 @@ The scorer does these steps for each frame:
 | `N` | (Hp·Wp, 12) | float32 | Activation norms (section 3, step 4). |
 | `Z` | (Hp·Wp, 512) | float32 | AE codes. |
 | `R` | (Hp·Wp, 12) | float32 | AE residuals. |
+| `raw` | (Hp·Wp, 4096) | float32 | Raw activations. Only for F3F0NR. |
 
 Hp = H / 16 and Wp = W / 16. Patches are in raster order: patch = row · Wp + col. For Cityscapes, the grid
 is 32 × 64. For ACDC, it is 36 × 64.
 
-Use `score` if your router needs one number for each region. Use `N`, `Z` and `R` if your router trains its
-own model.
+Use `score` if your router needs one number for each region. Use `N`, `Z`, `R` (and `raw`) if your router
+trains its own model.
 
 The column names are:
 - N: `<block>_n_mean`, `<block>_n_max` (stages 1–2), `<block>_n` (stages 3–4);
 - R: the same with `r`;
-- Z: `<block>_z<j>`.
+- Z: `<block>_z<j>`;
+- raw: `<block>_h<j>`.
 
 All columns are in the block order s1b1 … s4b2.
 
@@ -126,7 +132,7 @@ Put an empty `ae_error/__init__.py` next to it. Then add the scorer, `ae_error/s
 Copy it from this guide:
 
 ```python
-"""Patch error score of SegFormer-B0 from bottleneck-AE features (R, Z, ZR)."""
+"""Patch error score of SegFormer-B0 from bottleneck-AE features (R, Z, ZR, F3F0NR)."""
 from pathlib import Path
 
 import numpy as np
@@ -134,15 +140,16 @@ import pandas as pd
 import torch
 from catboost import CatBoost, Pool
 
-from ae_error.lib import BLOCKS, PATCH, MixFFNTap, frame_features, load_encoder, load_model, output_features
+from ae_error.lib import (BLOCKS, PATCH, MixFFNTap, frame_features, load_encoder, load_model, output_features,
+                          pool_to_patches)
 
 F0 = ["ent_mean", "ent_max", "ent_p90", "msp_mean", "msp_min", "margin_mean", "margin_min",
       "boundary_frac", "row", "col", "cls"]
-PARTS = {"R": ("N", "R"), "Z": ("Z",), "ZR": ("N", "Z", "R")}
+PARTS = {"R": ("F0", "N", "R"), "Z": ("F0", "Z"), "ZR": ("F0", "N", "Z", "R"), "F3F0NR": ("raw", "F0", "N", "R")}
 
 
 class ErrorScorer:
-    """features: "R", "Z" or "ZR"; root: folder with ckpt/ae_b8/<block>.pt and <features>.cbm."""
+    """features: "R", "Z", "ZR" or "F3F0NR"; root: folder with ckpt/ae_b8/<block>.pt and <features>.cbm."""
 
     def __init__(self, features, root, device="cuda", b0=None):
         root = Path(root)
@@ -156,17 +163,22 @@ class ErrorScorer:
     @torch.inference_mode()
     def __call__(self, small):
         """small: (3, H, W) uint8 RGB frame at the working resolution, H and W multiples of 16.
-        Returns score (Hp, Wp), B0 pred (H, W), probs (19, H, W) and the per-patch features N, Z, R."""
+        Returns score (Hp, Wp), B0 pred (H, W), probs (19, H, W) and the per-patch features N, Z, R
+        (and raw for F3F0NR)."""
         H, W = small.shape[1:]
         hw = (H // PATCH, W // PATCH)
         with MixFFNTap(self.b0) as tap:
             probs = self.b0(small[None].to(self.b0.mean.device), (W, H)).softmax(1)[0]
             pred = probs.argmax(0)
             enc_out, N = frame_features(tap.acts, {"ae": self.enc}, self.norms, hw)
+            if "raw" in self.parts:      # max over the patch positions, stored as fp16 (as in training)
+                raw = np.concatenate([pool_to_patches(tap.acts[b].float(), b, hw).half().cpu().numpy()
+                                      for b in BLOCKS], axis=1).astype(np.float32)
         Z, R = enc_out["ae"]
         f0 = output_features(probs, pred)
-        feats = {"N": N, "Z": Z, "R": R}
-        X = pd.concat([pd.DataFrame({c: f0[c] for c in F0})] + [pd.DataFrame(feats[p]) for p in self.parts], axis=1)
+        feats = {"N": N, "Z": Z, "R": R, **({"raw": raw} if "raw" in self.parts else {})}
+        cols = {"F0": pd.DataFrame({c: f0[c] for c in F0}), **{k: pd.DataFrame(v) for k, v in feats.items()}}
+        X = pd.concat([cols[p] for p in self.parts], axis=1)
         X.columns = self.model.feature_names_
         X["cls"] = X["cls"].astype(np.int32)
         score = self.model.predict(Pool(X, cat_features=["cls"]), prediction_type="Probability")[:, 1]
@@ -175,7 +187,7 @@ class ErrorScorer:
 
 ### 5.2 Fitted artifacts
 
-Copy these files into one artifact folder (30 MB in total):
+Copy these files into one artifact folder (32 MB in total):
 
 | Copy from (branch `SAE`) | Copy to | Size |
 |---|---|---|
@@ -183,6 +195,7 @@ Copy these files into one artifact folder (30 MB in total):
 | `results/ae/runs/R_ae_b8_catboost/model.cbm` | `<root>/R.cbm` | 0.6 MB |
 | `results/ae/runs/Z_ae_b8_catboost/model.cbm` | `<root>/Z.cbm` | 1.5 MB |
 | `results/ae/runs/ZR_ae_b8_catboost/model.cbm` | `<root>/ZR.cbm` | 1.4 MB |
+| `results/ae/runs/F3F0NR_ae_b8_catboost/model.cbm` | `<root>/F3F0NR.cbm` | 1.3 MB |
 
 The encoder checkpoints contain the normalisation constants. You do not need `results/ae/acts/`.
 
@@ -200,7 +213,7 @@ transformers 5.20.2, catboost 1.2.10 and Python 3.14.
 
    ```python
    from ae_error.scorer import ErrorScorer
-   scorer = ErrorScorer("ZR", root="<root>")          # or "R", or "Z"
+   scorer = ErrorScorer("ZR", root="<root>")          # or "R", "Z", "F3F0NR"
    ```
 
 5. If the router already has a B0 `SegModel`, give it to the scorer. This prevents a second copy of B0:
@@ -278,7 +291,7 @@ to (Hp, Wp). Then apply `to_pixels` and `region_stats`.
 
 Do this test after the installation. It compares the scorer with the saved test scores of branch `SAE`.
 
-1. Copy `results/ae/runs/<set>_ae_b8_catboost/scores.parquet` for R, Z and ZR to a test folder.
+1. Copy `results/ae/runs/<set>_ae_b8_catboost/scores.parquet` for R, Z, ZR and F3F0NR to a test folder.
 2. Load a frame and make it the same way as the B0 pipeline:
 
    ```python
@@ -292,7 +305,7 @@ Do this test after the installation. It compares the scorer with the saved test 
 6. Make sure that the maximum difference is less than 1e-6.
 
 Our result (2026-10-28, outside the repository, with only the copied code): the maximum difference was
-≤ 3e-8 for R, Z and ZR. We tested Cityscapes frame `frankfurt_000000_000576` and ACDC frame
+≤ 3e-8 for R, Z, ZR and F3F0NR. We tested Cityscapes frame `frankfurt_000000_000576` and ACDC frame
 `night_GOPR0351_frame_000033`. The difference comes from the float32 output.
 
 ## 10. Which set to use, and what it costs
@@ -307,23 +320,37 @@ Quality: the scorers are fitted on Cityscapes P0 and tested on P1 and ACDC val (
 | R | 0.564 | 0.313 | 0.743 | 0.737 |
 | Z | 0.563 | 0.304 | 0.731 | 0.642 |
 | ZR | 0.566 | 0.319 | 0.744 | 0.687 |
+| F3F0NR | 0.562 | 0.299 | 0.733 | 0.590 |
 
-Time per frame: RTX 3060 Ti, fp32, batch 1, 1024 × 512, mean of 20 frames:
+ACDC recall@10% per condition, where the sets differ most:
 
-| Part | R | Z | ZR |
-|---|---|---|---|
-| B0 only | 17 ms | 17 ms | 17 ms |
-| B0 + hooks + features | 45 ms | 45 ms | 45 ms |
-| Full scorer (+ CatBoost) | 49 ms | 64 ms | 65 ms |
+| Set | fog | night | rain | snow |
+|---|---|---|---|---|
+| entropy only | 0.420 | 0.171 | 0.422 | 0.354 |
+| R | 0.428 | 0.168 | 0.418 | 0.342 |
+| Z | 0.424 | 0.168 | 0.442 | 0.360 |
+| ZR | 0.428 | 0.177 | 0.435 | 0.356 |
+| F3F0NR | 0.426 | 0.166 | 0.446 | 0.365 |
+
+Time per frame: RTX 3060 Ti, fp32, batch 1, 1024 × 512, mean of 20 Cityscapes frames, the copied package:
+
+| Part | R | Z | ZR | F3F0NR |
+|---|---|---|---|---|
+| B0 only | 17 ms | 17 ms | 17 ms | 17 ms |
+| B0 + hooks + features | 46 ms | 46 ms | 46 ms | 80 ms |
+| Full scorer (+ CatBoost) | 55 ms | 67 ms | 68 ms | 253 ms |
+
+F3F0NR is slow. The raw pooling adds approximately 35 ms. The table of 4,131 columns and the CatBoost step add
+approximately 170 ms.
 
 Recommendation:
 - **ZR**: the best recall on P1 and ACDC. Use it as the default.
 - **R**: the best ranking inside the same entropy level under domain shift. It is also the fastest.
 - **Z**: no advantage over ZR at the same cost.
+- **F3F0NR**: the best recall in rain and snow. On ACDC all, it is worse than R and ZR (RESULTSV2.md §6a), and it
+  is about 4 times slower. Use it only if your data are mostly rain or snow, and if you can accept the time.
 
-NOTE: Do not add the raw activations to a set. The set F3F0NR (raw activations + F0 + N + R) gives P1 recall@10%
-0.562 and ACDC recall@10% 0.299, robust AUROC 0.733 (P1) and 0.590 (ACDC). That is worse than R and ZR on ACDC
-(RESULTSV2.md §6a). This guide does not supply it.
+NOTE: F3F0NR is a descriptive set. We added it after the test results were known.
 
 ## 11. Train again (only if B0, the resolution or the data change)
 
@@ -340,4 +367,4 @@ uv run python -m ae.classify test --features ZR --encoder ae_b8 --model catboost
 
 NOTE: `ae.classify` reads F0 and the labels from the v1 base tables. `sae.patch_features --sae none` writes
 only these tables (it does not need the SAE). Run it before `ae.patch_features`. Repeat the last two commands
-for R and Z.
+for R, Z and F3F0NR. F3F0NR also reads the raw activations from the v1 base tables.
