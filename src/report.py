@@ -42,17 +42,20 @@ train Cityscapes.
 FORMULAS = r"""## Формулы
 
 **Гиперболическое вложение.** Выход последнего 1×1 conv SegFormer, умноженный на `classifier_scale`, даёт для
-пикселя вектор $v \in \mathbb{R}^K$, $K = 19$, по координате на класс. Он отображается в шар Пуанкаре кривизны $-c$;
-координаты точки служат логитами, а расстояние до начала координат — мерой уверенности:
+пикселя вектор $v \in \mathbb{R}^K$, $K = 19$, по координате на класс. По умолчанию он отображается на гиперболоид
+$\langle x, x \rangle_L = -1/c$ (модель Лоренца, `manifold: lorentz`): пространственные координаты точки служат
+логитами, а расстояние до начала координат $o = (1/\sqrt{c}, 0, \dots, 0)$ — мерой уверенности:
 
 $$
-x = \exp_0^c(v) = \tanh\left(\sqrt{c}\,\lVert v \rVert\right) \frac{v}{\sqrt{c}\,\lVert v \rVert}, \qquad
-p_k = \frac{e^{x_k}}{\sum_{j=1}^{K} e^{x_j}}, \qquad
-d_c(x, 0) = \frac{2}{\sqrt{c}} \operatorname{artanh}\left(\sqrt{c}\,\lVert x \rVert\right) = 2 \lVert v \rVert.
+x = \exp_o^c(v) = \frac{1}{\sqrt{c}} \left(\cosh\left(\sqrt{c}\,\lVert v \rVert\right),\
+\sinh\left(\sqrt{c}\,\lVert v \rVert\right) \frac{v}{\lVert v \rVert}\right), \qquad
+p_k = \frac{e^{x_k}}{\sum_{j=1}^{K} e^{x_j}}, \qquad d_c(x, o) = \lVert v \rVert,
 $$
 
-В модели Лоренца логиты — пространственные координаты точки гиперболоида, а $d \propto \lVert v \rVert$, поэтому
-неопределённость ниже та же.
+где $x_1, \dots, x_K$ — пространственные координаты. В шаре Пуанкаре из статьи (`manifold: poincare`)
+$x = \tanh(\sqrt{c}\,\lVert v \rVert)\, v / (\sqrt{c}\,\lVert v \rVert)$ и $d = 2 \lVert v \rVert$, но логиты там не
+больше $1/\sqrt{c}$, и с замороженной сетью дообучение портит сегментацию. В обеих моделях $d \propto \lVert v \rVert$,
+поэтому неопределённость ниже одна и та же.
 
 **Неопределённость (Eq. 15).** $\bar d_P$ — среднее расстояние по патчу $P$ из `patch` × `patch` пикселей, максимум
 берётся по патчам кадра:
