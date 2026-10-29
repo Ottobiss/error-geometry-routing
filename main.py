@@ -3,6 +3,7 @@
   python main.py fit                         fit features and the flag threshold on fit_set
   python main.py evaluate                    mIoU, spent budget and time on eval_sets
   python main.py run "frames/*.png" masks/   segment frames as one stream: masks + levels.csv
+  python main.py compare a.npz b.npz         paired bootstrap of two evaluate runs (per-frame .npz next to results)
   ... --config other.yaml                    another config
 """
 import argparse
@@ -92,8 +93,8 @@ def evaluate(cfg):
         clock = Clock()
         heavy = segment(pipe.heavy, img)
         clock("heavy")
-        frames.append({"set": owner[i], "level": r.level, "ms": sum(r.times.values()), "ms_heavy": clock.times["heavy"],
-                       "conf": [confusion(p, gt, n) for p in (light, r.pred, heavy)]})
+        frames.append({"index": i, "set": owner[i], "level": r.level, "ms": sum(r.times.values()),
+                       "ms_heavy": clock.times["heavy"], "conf": [confusion(p, gt, n) for p in (light, r.pred, heavy)]})
 
     report = {s: summary([f for f in frames if f["set"] == s]) for s in cfg.eval_sets}
     report["pool"] = summary(frames)
@@ -106,19 +107,47 @@ def evaluate(cfg):
     report["config"] = asdict(cfg)
     Path(cfg.results).parent.mkdir(parents=True, exist_ok=True)
     Path(cfg.results).write_text(json.dumps(report, indent=2))
+    frames.sort(key=lambda f: f["index"])  # stream order -> dataset order, so runs can be paired frame by frame
+    np.savez_compressed(Path(cfg.results).with_suffix(".npz"), conf=np.array([f["conf"] for f in frames]),
+                        set=[f["set"] for f in frames], cost=[LEVELS[f["level"]].cost for f in frames])
+
+
+def compare(a, b, resamples=2000, seed=0):
+    """Paired frame bootstrap of two evaluate runs on the same frames (their .npz files): a - b in mIoU and
+    in % of the light -> heavy gap closed, per set and for the pool, with 95% intervals."""
+    a, b = np.load(a), np.load(b)
+    if not np.array_equal(a["set"], b["set"]) or not np.array_equal(a["conf"][:, 0], b["conf"][:, 0]):
+        raise ValueError("the runs are not on the same frames")
+    rng = np.random.default_rng(seed)
+    print(f"{'set':16} {'frames':>6} {'cost a':>7} {'cost b':>7} {'mIoU a-b [95%]':>24} {'closed a-b [95%]':>24}")
+    for s in [*dict.fromkeys(a["set"]), "pool"]:
+        idx = np.flatnonzero(a["set"] == s) if s != "pool" else np.arange(len(a["set"]))
+        weights = np.vstack([np.ones(len(idx)), rng.multinomial(len(idx), np.ones(len(idx)) / len(idx), resamples)])
+        stats = []
+        for run in (a, b):
+            conf = np.tensordot(weights, run["conf"][idx].astype(np.float64), axes=1)  # (1 + resamples, 3, C, C)
+            m = np.array([[miou(c) for c in sample] for sample in conf])                  # light, pipeline, heavy
+            stats.append(np.stack([m[:, 1], 100 * (m[:, 1] - m[:, 0]) / (m[:, 2] - m[:, 0])], 1))
+        diff = stats[0] - stats[1]  # row 0: the runs as they are, rows 1+: resamples
+        lo, hi = np.percentile(diff[1:], [2.5, 97.5], axis=0)
+        cells = [f"{diff[0, j]:+6.2f} [{lo[j]:+6.2f}, {hi[j]:+6.2f}]" for j in range(2)]
+        print(f"{s:16} {len(idx):6} {a['cost'][idx].mean():7.3f} {b['cost'][idx].mean():7.3f} {cells[0]:>24} {cells[1]:>24}")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["fit", "evaluate", "run"])
-    ap.add_argument("paths", nargs="*", help='run: glob of frames and the output folder, e.g. "frames/*.png" masks/')
+    ap.add_argument("command", choices=["fit", "evaluate", "run", "compare"])
+    ap.add_argument("paths", nargs="*", help='run: "frames/*.png" masks/; compare: a.npz b.npz from two evaluate runs')
     ap.add_argument("--config", default="config.yaml")
     args = ap.parse_args()
     cfg = Config.load(args.config)
-    if args.command == "run":
+    if args.command in ("run", "compare"):
         if len(args.paths) != 2:
-            ap.error('run needs two paths: "frames/*.png" masks/')
-        run(cfg, *args.paths)
+            ap.error(f"{args.command} needs two paths")
+        if args.command == "run":
+            run(cfg, *args.paths)
+        else:
+            compare(*args.paths)
     else:
         {"fit": fit, "evaluate": evaluate}[args.command](cfg)
 
