@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-29",
+  "repository": "Ottobiss/error-geometry-routing",
+  "base_commit": "8b4bbef156c9de1e0ef3c9d2bfb7d06249f8e9e2",
+  "target_branch": "results/spatial-router-acdc-20261028",
+  "repository_subdirectory": "experiments/spatial_routing_sae",
+  "input_archive_sha256": "599c99f5526c879324f884a2bb4b85ff9814ea7edfbefa9c5de31da9b292505c",
+  "source_provenance": "Original uploaded archive; current source/results/ae_b8 retained unchanged except additional derived tables. Historical results are transcribed from prior recorded experiment outputs.",
+  "publication_method": "GitHub browser UI, authenticated user Dianka678"
+}
