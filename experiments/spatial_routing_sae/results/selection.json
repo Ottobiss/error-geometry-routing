@@ -1,0 +1,7 @@
+{
+  "variant": "confidence",
+  "chosen_on": "P0 grouped OOF mean over seeds k1",
+  "primary_k": 1,
+  "acdc_used": false,
+  "speed_claim": false
+}

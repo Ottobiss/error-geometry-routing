@@ -1,0 +1,71 @@
+CV 1 /5 seed 0 confidence done
+CV 1 /5 seed 0 confidence_N done
+CV 1 /5 seed 0 confidence_NZ done
+CV 1 /5 seed 1 confidence done
+CV 1 /5 seed 1 confidence_N done
+CV 1 /5 seed 1 confidence_NZ done
+CV 1 /5 seed 2 confidence done
+CV 1 /5 seed 2 confidence_N done
+CV 1 /5 seed 2 confidence_NZ done
+CV 2 /5 seed 0 confidence done
+CV 2 /5 seed 0 confidence_N done
+CV 2 /5 seed 0 confidence_NZ done
+CV 2 /5 seed 1 confidence done
+CV 2 /5 seed 1 confidence_N done
+CV 2 /5 seed 1 confidence_NZ done
+CV 2 /5 seed 2 confidence done
+CV 2 /5 seed 2 confidence_N done
+CV 2 /5 seed 2 confidence_NZ done
+CV 3 /5 seed 0 confidence done
+CV 3 /5 seed 0 confidence_N done
+CV 3 /5 seed 0 confidence_NZ done
+CV 3 /5 seed 1 confidence done
+CV 3 /5 seed 1 confidence_N done
+CV 3 /5 seed 1 confidence_NZ done
+CV 3 /5 seed 2 confidence done
+CV 3 /5 seed 2 confidence_N done
+CV 3 /5 seed 2 confidence_NZ done
+CV 4 /5 seed 0 confidence done
+CV 4 /5 seed 0 confidence_N done
+CV 4 /5 seed 0 confidence_NZ done
+CV 4 /5 seed 1 confidence done
+CV 4 /5 seed 1 confidence_N done
+CV 4 /5 seed 1 confidence_NZ done
+CV 4 /5 seed 2 confidence done
+CV 4 /5 seed 2 confidence_N done
+CV 4 /5 seed 2 confidence_NZ done
+CV 5 /5 seed 0 confidence done
+CV 5 /5 seed 0 confidence_N done
+CV 5 /5 seed 0 confidence_NZ done
+CV 5 /5 seed 1 confidence done
+CV 5 /5 seed 1 confidence_N done
+CV 5 /5 seed 1 confidence_NZ done
+CV 5 /5 seed 2 confidence done
+CV 5 /5 seed 2 confidence_N done
+CV 5 /5 seed 2 confidence_NZ done
+       method  k  mean_miou  seed_min  seed_max
+   confidence  1  74.736531 74.717441 74.768611
+ confidence_N  1  74.337834 74.241572 74.500664
+confidence_NZ  1  73.849400 73.756682 73.937796
+      entropy  1  73.949520 73.949520 73.949520
+   confidence  2  77.627178 77.589266 77.646527
+ confidence_N  2  76.637407 76.412704 76.777071
+confidence_NZ  2  76.360328 76.274448 76.453708
+      entropy  2  76.636861 76.636861 76.636861
+   confidence  3  78.888313 78.870369 78.900894
+ confidence_N  3  78.508725 78.267706 78.928726
+confidence_NZ  3  78.195116 78.049792 78.312463
+      entropy  3  78.199397 78.199397 78.199397
+ k                       comparison  delta_pp    ci_low   ci_high  groups  primary                                                                  status
+ 1    confidence_N minus confidence -0.398697 -0.490189  0.069936     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 1 confidence_NZ minus confidence_N -0.488434 -0.668203  0.019269     143     True exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 1   confidence_NZ minus confidence -0.887131 -1.078512  0.048531     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 1         confidence minus entropy  0.787011 -0.031269  0.921113     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 2    confidence_N minus confidence -0.989771 -1.216403  0.043639     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 2 confidence_NZ minus confidence_N -0.277078 -0.663171 -0.096907     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 2   confidence_NZ minus confidence -1.266850 -1.522156 -0.288791     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 2         confidence minus entropy  0.990317 -0.125286  1.179935     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 3    confidence_N minus confidence -0.379587 -0.475721  0.166797     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 3 confidence_NZ minus confidence_N -0.313610 -0.495301 -0.009260     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 3   confidence_NZ minus confidence -0.693197 -0.899979  0.054440     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds
+ 3         confidence minus entropy  0.688916 -0.106341  0.844845     143    False exploratory; unadjusted sequence bootstrap conditional on trained folds

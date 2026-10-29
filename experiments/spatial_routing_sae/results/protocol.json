@@ -1,0 +1,45 @@
+{
+  "schema": "allblock-NZ-gain-v1",
+  "script_sha": "812465f65685e060f8a233c517cf8b1e1f76ff22aaa87b07f80e5495f68ceba9",
+  "ae_source_sha": "36bfa8b7db26152e19640d3339d0c95a23026d04c945d066d5c5469e31ac9034",
+  "p0_ids_sha": "765c20f60a436a93edb1994957f2ac0269d0ecc98bd0d73fbb6cf982698c0990",
+  "ae_sha": {
+    "s1b1": "a38fc916329e86e9eb2297d18dd130a86699619dddf5ace0d29dfdb84ba346d7",
+    "s1b2": "b7f10b7dc034ebd517e3697c72181a6d315d20e624b32abb01aea57b7cfb8a78",
+    "s2b1": "22caf2b3c2fc3fc11c9f5eba30932eeab12b18137a3c1e4f24b760b0f374b655",
+    "s2b2": "6d11078e6718c20562ab26163c60fba8407ae9962ff32d2158599f6df50fd8f2",
+    "s3b1": "7a72893b02680671e2260df5a043cd568298736f5c656e6f177f11bac9d00b22",
+    "s3b2": "b14af7200540a795a3f88b9ba5c3a862048f44d438ae1f53a20f66f974590f94",
+    "s4b1": "14cf476a4f063333967d3f353842504c169d3b3c7e3f3bb2ade2529f4ed6633f",
+    "s4b2": "2f76cef2aa51fa1b60e2d816f27a001b3368787b19217e1d8d839b6139f23fbd"
+  },
+  "b0": "nvidia/segformer-b0-finetuned-cityscapes-512-1024",
+  "b5": "nvidia/segformer-b5-finetuned-cityscapes-1024-1024",
+  "variants": [
+    "confidence",
+    "confidence_N",
+    "confidence_NZ"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "epochs": 18,
+  "primary_k": 1,
+  "secondary_ks": [
+    2,
+    3
+  ],
+  "folds": "5 GroupKFold city+sequence",
+  "target": "(corrected-spoiled)/65536",
+  "channels": 548,
+  "architecture": "Conv1x1 548->32 ReLU; Conv3x3 32->32 ReLU; avgpool; concat20global; Linear52->32 ReLU->1",
+  "optimization": "AdamW lr .002 weight_decay .0002 batch128 SmoothL1 beta .02 fixed18epochs",
+  "selection": "mean OOF mIoU at k1 over seeds; deterministic tie order confidence,N,NZ",
+  "normalization": "N log1p; N and signed Z mean/std on fold training images only; zero unused channels",
+  "torch": "2.11.0+cu130",
+  "transformers": "4.46.3",
+  "status": "new controls, not numerically comparable to old base; ACDC exploratory reused; no speed claim",
+  "acdc_used_for_selection": false
+}

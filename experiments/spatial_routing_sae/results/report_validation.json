@@ -1,0 +1,9 @@
+{
+  "archive_acdc_frames": 406,
+  "acdc_sequences": 21,
+  "cityscapes_frames": 300,
+  "acdc_csv_matches_confusions": true,
+  "cv_csv_matches_confusions": true,
+  "source_sha_matches_protocol": true,
+  "gpu_run_performed_for_report": false
+}

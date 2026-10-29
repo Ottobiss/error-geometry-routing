@@ -1,0 +1,13 @@
+k,comparison,delta_pp,ci_low,ci_high,groups,primary,status
+1,confidence_N minus confidence,-0.3986971762657466,-0.4901889645639051,0.06993649787256613,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+1,confidence_NZ minus confidence_N,-0.488433834198536,-0.6682033630363272,0.019268814350539107,143,True,exploratory; unadjusted sequence bootstrap conditional on trained folds
+1,confidence_NZ minus confidence,-0.8871310104642826,-1.0785116618534358,0.048530740360257396,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+1,confidence minus entropy,0.7870106730463959,-0.03126890264522153,0.9211126741333104,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+2,confidence_N minus confidence,-0.989771351643777,-1.2164028030757807,0.0436388474329204,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+2,confidence_NZ minus confidence_N,-0.2770782576003086,-0.6631714662367857,-0.09690683442008474,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+2,confidence_NZ minus confidence,-1.2668496092440857,-1.5221560503132108,-0.28879113727189193,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+2,confidence minus entropy,0.9903172437611829,-0.12528638737555486,1.179934625538008,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+3,confidence_N minus confidence,-0.3795874112358793,-0.47572070675467043,0.1667972355549252,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+3,confidence_NZ minus confidence_N,-0.313609863773119,-0.49530088265103783,-0.009259789332414252,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+3,confidence_NZ minus confidence,-0.6931972750089983,-0.8999787067495604,0.05444037440961299,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds
+3,confidence minus entropy,0.6889163075740328,-0.1063408960837774,0.8448448100221321,143,False,exploratory; unadjusted sequence bootstrap conditional on trained folds

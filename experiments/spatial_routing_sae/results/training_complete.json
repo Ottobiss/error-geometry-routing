@@ -1,0 +1,16 @@
+{
+  "complete": true,
+  "checkpoints": {
+    "confidence": "22d43aa6d2857942f986a14a94b1572fe0f429a8f1e33810332bd55b5198ee20",
+    "confidence_N": "a4e50bf3c31d13087627f95862e332a4e79349aa9a3d12dc262a4e102f85ec4e",
+    "confidence_NZ": "67784d94483333f1cfb5fe96e194ad11d80f0a8d0dd95299b60e85c6e33e2569"
+  },
+  "selection": {
+    "variant": "confidence",
+    "chosen_on": "P0 grouped OOF mean over seeds k1",
+    "primary_k": 1,
+    "acdc_used": false,
+    "speed_claim": false
+  },
+  "acdc_run": false
+}
