@@ -1,0 +1,15 @@
+# Settings of the pipeline; any key left out takes the default from config.py.
+light: segformer-b0
+heavy: segformer-b5
+flag: knn
+priority: entropy
+
+budget: 0.5
+quantile: 0.95
+window: 50
+
+data: data
+state: state.pt
+fit_set: cs_fit
+eval_sets: [cs_test, acdc_fog, acdc_night, acdc_rain, acdc_snow]
+results: results/evaluate.json
